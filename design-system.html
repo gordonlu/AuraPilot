@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<title>AuraPilot · Design System</title>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0E0E10;--bg2:#1A1A1E;--bg3:#141417;--bd:#26262B;--t1:#E6E6EA;--t2:#9A9AA3;--t3:#6B6B73;
+--ac:#3DA9FC;--ac-h:#5BBAFF;--ac-p:#2A86D6;--gr:#3FB950;--ye:#D29922;--re:#F85149;
+--p0:#F85149;--p1:#DB6D28;--p2:#58A6FF;--p3:#8B949E;
+--mono:'JetBrains Mono',monospace;--sans:'Manrope',sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--t1);font-family:var(--sans);font-size:14px;line-height:1.6;padding:48px;max-width:1080px;margin:auto}
+h1{font-size:30px;font-weight:800;letter-spacing:-.03em;margin-bottom:6px}
+h2{font-size:20px;font-weight:800;margin:40px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--bd)}
+h3{font-size:15px;font-weight:700;margin:22px 0 10px;color:var(--ac)}
+p{color:var(--t2);margin-bottom:10px}
+.sub{color:var(--t3);font-family:var(--mono);font-size:13px;margin-bottom:30px}
+table{width:100%;border-collapse:collapse;margin-bottom:14px;font-size:13px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--bd);vertical-align:top}
+th{background:var(--bg2);font-weight:700;color:var(--t1)}
+td code,code{font-family:var(--mono);font-size:12px;background:var(--bg3);padding:1px 6px;border-radius:4px;color:var(--ac)}
+.sw{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:8px;vertical-align:middle;border:1px solid var(--bd)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.cell{background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:12px}
+.cell .c{width:100%;height:34px;border-radius:6px;margin-bottom:8px}
+.cell .n{font-size:11px;color:var(--t3);font-family:var(--mono)}
+.cell .h{font-size:12px;font-weight:600}
+.tag{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:4px;margin:2px}
+.t-p0{background:rgba(248,81,73,.14);color:var(--p0)} .t-p1{background:rgba(219,109,40,.14);color:var(--p1)}
+.t-p2{background:rgba(88,166,255,.14);color:var(--p2)} .t-p3{background:rgba(139,148,158,.16);color:var(--p3)}
+.note{background:rgba(61,169,252,.08);border:1px solid rgba(61,169,252,.25);border-radius:8px;padding:14px 16px;color:var(--t1);font-size:13px;margin:14px 0}
+.kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--bd);border-radius:4px;padding:1px 6px;color:var(--t2)}
+ul{margin:0 0 14px 20px;color:var(--t2)} li{margin:4px 0}
+</style>
+</head>
+<body>
+<h1>AuraPilot · Design System</h1>
+<div class="sub">DesignSystemManifest v1.0 · 强调色 领航青蓝 #3DA9FC（纯色·无渐变）</div>
+
+<div class="note">
+  <b>设计主张</b>：开发者工具美学，参考 Linear / Raycast / Cursor 的气质——信息密度高但不拥挤，克制的色彩（1 个强调色 + 中性灰阶 + 绿/黄/红状态色），暗色优先、浅色同构。
+  字体刻意避开被禁止清单点名的 Inter，改用 <b>Manrope</b>（几何无衬线，UI 尺寸表现出色）；代码 / ID / 字段名用 <b>JetBrains Mono</b>（依用户指定）。
+</div>
+
+<h2>1 · 配色系统</h2>
+<h3>暗色模式（默认）</h3>
+<table>
+<tr><th>Token</th><th>HEX</th><th>用途</th></tr>
+<tr><td><code>--bg-base</code></td><td><span class="sw" style="background:#0E0E10"></span>#0E0E10</td><td>应用主背景、页面底色</td></tr>
+<tr><td><code>--bg-elev</code></td><td><span class="sw" style="background:#1A1A1E"></span>#1A1A1E</td><td>卡片、工具栏、模态、侧栏</td></tr>
+<tr><td><code>--bg-sunken</code></td><td><span class="sw" style="background:#141417"></span>#141417</td><td>输入框、元数据区、看板列底</td></tr>
+<tr><td><code>--border</code></td><td><span class="sw" style="background:#26262B"></span>#26262B</td><td>低对比边框、分隔线</td></tr>
+<tr><td><code>--border-strong</code></td><td><span class="sw" style="background:#34343B"></span>#34343B</td><td>悬浮/聚焦边框</td></tr>
+<tr><td><code>--text-1</code></td><td><span class="sw" style="background:#E6E6EA"></span>#E6E6EA</td><td>主文字、标题</td></tr>
+<tr><td><code>--text-2</code></td><td><span class="sw" style="background:#9A9AA3"></span>#9A9AA3</td><td>次要文字、项目名</td></tr>
+<tr><td><code>--text-3</code></td><td><span class="sw" style="background:#6B6B73"></span>#6B6B73</td><td>占位符、元标签、时间戳</td></tr>
+<tr><td><code>--accent</code></td><td><span class="sw" style="background:#3DA9FC"></span>#3DA9FC</td><td>选中态 / TASK-ID / 链接 / 聚焦环（非填充）</td></tr>
+<tr><td><code>--accent-h</code></td><td><span class="sw" style="background:#5BBAFF"></span>#5BBAFF</td><td>accent hover</td></tr>
+<tr><td><code>--accent-p</code></td><td><span class="sw" style="background:#2A86D6"></span>#2A86D6</td><td>accent pressed</td></tr>
+<tr><td><code>--btn-primary</code></td><td><span class="sw" style="background:#256FD0"></span>#256FD0</td><td>填充按钮主色（白字）· hover #2E7AE0 · pressed #1E5FB8</td></tr>
+<tr><td><code>--accent-soft</code></td><td><span class="sw" style="background:rgba(61,169,252,.12)"></span>rgba(61,169,252,.12)</td><td>选中背景、淡填充</td></tr>
+</table>
+
+<h3>状态色 / 优先级色</h3>
+<div class="grid">
+<div class="cell"><div class="c" style="background:#3FB950"></div><div class="h">green</div><div class="n">#3FB950</div><div class="n">健康 / 完成</div></div>
+<div class="cell"><div class="c" style="background:#D29922"></div><div class="h">yellow</div><div class="n">#D29922</div><div class="n">阻塞 / 进行中</div></div>
+<div class="cell"><div class="c" style="background:#F85149"></div><div class="h">red</div><div class="n">#F85149</div><div class="n">严重 / 警告</div></div>
+<div class="cell"><div class="c" style="background:#F85149"></div><div class="h">P0</div><div class="n">#F85149</div><div class="n">红</div></div>
+<div class="cell"><div class="c" style="background:#DB6D28"></div><div class="h">P1</div><div class="n">#DB6D28</div><div class="n">橙</div></div>
+<div class="cell"><div class="c" style="background:#58A6FF"></div><div class="h">P2</div><div class="n">#58A6FF</div><div class="n">蓝</div></div>
+<div class="cell"><div class="c" style="background:#8B949E"></div><div class="h">P3</div><div class="n">#8B949E</div><div class="n">灰</div></div>
+</div>
+<p>优先级徽章：<span class="tag t-p0">P0</span><span class="tag t-p1">P1</span><span class="tag t-p2">P2</span><span class="tag t-p3">P3</span>（JetBrains Mono 11px，圆角 4px 小标签）。</p>
+
+<h3>浅色模式（同构，仅 token 切换）</h3>
+<table>
+<tr><th>Token</th><th>HEX</th><th>差异说明</th></tr>
+<tr><td><code>--bg-base</code></td><td><span class="sw" style="background:#FAFAFA"></span>#FAFAFA</td><td>近白底</td></tr>
+<tr><td><code>--bg-elev</code></td><td><span class="sw" style="background:#FFFFFF"></span>#FFFFFF</td><td>纯白卡片</td></tr>
+<tr><td><code>--bg-sunken</code></td><td><span class="sw" style="background:#F4F4F5"></span>#F4F4F5</td><td>浅灰凹陷</td></tr>
+<tr><td><code>--border</code></td><td><span class="sw" style="background:#E5E5E5"></span>#E5E5E5</td><td>浅边框</td></tr>
+<tr><td><code>--text-1</code></td><td><span class="sw" style="background:#18181B"></span>#18181B</td><td>近黑字</td></tr>
+<tr><td><code>--accent</code></td><td><span class="sw" style="background:#1E8FE0"></span>#1E8FE0</td><td>降饱和保对比</td></tr>
+<tr><td><code>--btn-primary</code></td><td><span class="sw" style="background:#1E7FD0"></span>#1E7FD0</td><td>填充按钮主色（浅色版·白字）</td></tr>
+<tr><td>状态色</td><td>略降饱和</td><td>green #2EA043 / yellow #B9841B / red #D8362C</td></tr>
+</table>
+
+<h3>阻塞聚焦视图（氛围态）</h3>
+<p>整页背景切换为偏红暗调：<code>--bg-base #1A1010</code> · <code>--bg-elev #211313</code> · <code>--border #3A1F1F</code>，强化「需要关注」。</p>
+<p>浅色主题下改为浅红氛围底（<code>--bg-base #FBF1F1</code> / 卡片 <code>#FFFFFF</code>）+ 深字，blockers 文字用加深红 <code>#C2271C</code> 保对比；暗色不变。</p>
+
+<h2>2 · 字体与排版</h2>
+<table>
+<tr><th>角色</th><th>字体</th><th>字号阶梯</th><th>字重</th></tr>
+<tr><td>正文 / UI</td><td>Manrope</td><td>11 / 12 / 13 / 14 / 16 / 20 / 24 / 32</td><td>400–800</td></tr>
+<tr><td>代码·ID·字段</td><td>JetBrains Mono</td><td>11 / 12</td><td>400–600</td></tr>
+</table>
+<ul>
+<li><b>TASK-ID</b>：JetBrains Mono 11px · 600 · 强调青蓝</li>
+<li><b>卡片标题</b>：Manrope 13px · 700</li>
+<li><b>页面大标题</b>：32px · 800 · 字距 -.03em</li>
+<li><b>行高</b>：标题 1.3 / 正文 1.5；密度可切 紧凑/标准/宽松</li>
+</ul>
+
+<h2>3 · 间距 / 圆角 / 阴影</h2>
+<table>
+<tr><th>标尺（4px 基准）</th><td colspan="3">4 · 8 · 12 · 16 · 20 · 24 · 32 · 40 · 48 · 64</td></tr>
+<tr><th>圆角</th><td>sm 4px</td><td>md 6px</td><td>lg 8px · xl 12px · pill 999px</td></tr>
+<tr><th>阴影（暗）</th><td>card 0 1px 2px rgba(0,0,0,.4)</td><td>hover 0 4px 14px rgba(0,0,0,.5)</td><td>modal 0 16px 48px rgba(0,0,0,.6)</td></tr>
+<tr><th>关键尺寸</th><td>工具栏 48px</td><td>状态栏 24px</td><td>列间距 16px · 卡片内距 12px</td></tr>
+</table>
+
+<h2>4 · 组件规范与交互状态</h2>
+<h3>按钮 .btn</h3>
+<table>
+<tr><th>状态</th><th>表现</th></tr>
+<tr><td>default</td><td>bg-elev · 1px border · text-1</td></tr>
+<tr><td>hover</td><td>bg-hover · border-strong</td></tr>
+<tr><td>active</td><td>translateY(1px)</td></tr>
+<tr><td>disabled</td><td>opacity .5 · 禁点击</td></tr>
+<tr><td>.btn-accent</td><td>bg --btn-primary #256FD0 · 白字 #FFF · hover #2E7AE0 · pressed #1E5FB8（AA 对比）</td></tr>
+<tr><td>:focus-visible</td><td>2px accent outline · offset 1–2px（全局键盘可达）</td></tr>
+<tr><td>.btn-danger</td><td>红字 · hover 红底 10% 透明</td></tr>
+</table>
+
+<h3>任务卡片 .task</h3>
+<table>
+<tr><th>状态</th><th>表现</th></tr>
+<tr><td>default</td><td>bg-elev · 1px border · radius 8 · pad 12</td></tr>
+<tr><td>hover</td><td>上浮 2px · shadow-hover · border-strong · 显示快速操作</td></tr>
+<tr><td>selected</td><td>border accent · 1px accent 内描边 + 青蓝辉光阴影</td></tr>
+<tr><td>is-blocked</td><td>左侧 3px 红竖条 · 标题后缀 ⚠</td></tr>
+<tr><td>is-parsefail</td><td>黄底 10% · 黄边 · 标题黄 · 「协议违规」标签</td></tr>
+<tr><td>含扩展字段</td><td>右下 ℹ · hover 显示扩展字段列表</td></tr>
+<tr><td>is-skeleton</td><td>灰阶骨架屏（标题/元数据占位，1.2s 流光）</td></tr>
+</table>
+
+<h3>项目分组头 .group-head（含指标与活动可视化）</h3>
+<p>每个项目分组头展示项目级指标与活动趋势，两行紧凑布局，避免全文字单调：</p>
+<table>
+<tr><th>元素</th><th>说明</th></tr>
+<tr><td>第一行</td><td>▾ 项目名 · 健康度圆点 · live 脉冲(有 Agent 在线时) · 任务数(右)</td></tr>
+<tr><td>第二行 .group-sub</td><td>技术栈徽章 · LOC · 当前分支 · 最近提交 · open PR · Agent 数 · 活跃度热力图(右)</td></tr>
+<tr><td>技术栈徽章</td><td>GitHub 风格：品牌色小方块 + 名称 · Mono 10px · elev 底 + border · 圆角 4px（React #61DAFB / TS #3178C6 / Go #00ADD8 / Rust #DEA584 …）</td></tr>
+<tr><td>live 脉冲</td><td>Agent 在线时显示 · accent 圆点 1.6s 扩散 ring · 强调「活动中」</td></tr>
+<tr><td>活跃度热力图</td><td>近 12 天 · 9×9 方块 · 5 级浓度(accent 透明度 0/.3/.55/.78/1) · 类 GitHub contribution</td></tr>
+<tr><td>健康度圆点</td><td>7px · green #3FB950 / yellow #D29922 / red #F85149</td></tr>
+<tr><td>折叠</td><td>点分组头折叠任务与 sub 行 · chev 旋转 -90°</td></tr>
+</table>
+<p>指标由 <code>PROJECTS</code> 映射按项目名注入；可扩展为读取真实 <code>.aurapilot/project.yaml</code> + git log 活跃度。</p>
+
+<h3>开关 / 段控件 / 进度条</h3>
+<ul>
+<li><b>Toggle</b>：38×22 药丸；on 时 accent 底 + 滑块右移 16px</li>
+<li><b>Segmented</b>：选中项 accent-soft 底 + accent 字 + accent 边</li>
+<li><b>Progress</b>：高 5px · bg-sunken · fill accent · 宽度按百分比 · 300ms 缓动</li>
+</ul>
+
+<h2>5 · 微动画与快捷键</h2>
+<table>
+<tr><th>动效</th><th>参数</th></tr>
+<tr><td>卡片 hover</td><td>100ms 上浮 2px + 阴影</td></tr>
+<tr><td>状态流转</td><td>卡片 300ms 滑动至新列 (cubic-bezier(.4,0,.2,1))</td></tr>
+<tr><td>新任务入场</td><td>顶部滑入 + 淡入</td></tr>
+<tr><td>实时脉冲</td><td>绿点 1.6s 扩散 ring</td></tr>
+<tr><td>模态出现</td><td>rise 300ms 上移 12px 淡入</td></tr>
+</table>
+<p>键盘（参考 Linear）：<span class="kbd">N</span> 新建 · <span class="kbd">/</span> 聚焦搜索 · <span class="kbd">J/K</span> 上下选 · <span class="kbd">E</span> 编辑 · <span class="kbd">D</span> 删除 · <span class="kbd">Enter</span> 详情 · <span class="kbd">1–4</span> 列聚焦 · <span class="kbd">B</span> 阻塞视图 · <span class="kbd">⌘K</span> 命令面板 · <span class="kbd">Esc</span> 关闭。尊重 <code>prefers-reduced-motion</code>。</p>
+
+<h2>6 · 应用图标</h2>
+<p>意象：罗盘 / 舵轮 / 领航员。简洁线性风——外圈细线圆 + 内部青蓝菱形指针（南北针），中心留白圆点。纯 SVG，单色 accent，可随主题着色。</p>
+
+<div class="note"><b>可访问性基线</b>：正文对比度满足 WCAG AA；交互目标 ≥ 44px（工具栏按钮、模态按钮）；状态色均附文字/图标，不靠颜色单通道传达；模态支持焦点陷阱与 Esc 关闭。</div>
+</body>
+</html>
