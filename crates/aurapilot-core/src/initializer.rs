@@ -280,6 +280,10 @@ mod tests {
         )
         .unwrap();
         let protocol = repo.join(".aurapilot/AGENTS.md");
+        let generated_protocol = fs::read_to_string(&protocol).unwrap();
+        assert!(generated_protocol.contains("默认创建独立任务分支"));
+        assert!(generated_protocol.contains("可以记录当前分支而不新建分支"));
+        assert!(generated_protocol.contains("未领取的任务不创建分支"));
         fs::write(&protocol, "custom protocol").unwrap();
         let second = initialize_repository(&repo, &CoreConfig::default(), &options).unwrap();
         assert_eq!(second.status, InitStatus::AlreadyInitialized);
