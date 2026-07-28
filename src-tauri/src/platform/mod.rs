@@ -37,9 +37,6 @@ pub fn launch(prepared: &PreparedLaunch) -> io::Result<Child> {
             "clipboard-only profiles do not launch a process",
         ));
     }
-    if prepared.prompt_transport == PromptTransport::Clipboard {
-        copy_text(&prepared.prompt)?;
-    }
     let executable = resolve_command(&prepared.executable).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,

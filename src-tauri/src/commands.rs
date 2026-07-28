@@ -22,6 +22,7 @@ use aurapilot_core::{
 use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use uuid::Uuid;
 
 #[tauri::command]
@@ -339,7 +340,13 @@ pub async fn push_task(
         return finish_clipboard_push(&state, &app, attempt, pointer_prompt);
     }
 
-    match platform::launch(&prepared) {
+    let launch_result = if prepared.prompt_transport == PromptTransport::Clipboard {
+        copy_text(&app, &prepared.prompt).and_then(|()| platform::launch(&prepared))
+    } else {
+        platform::launch(&prepared)
+    };
+
+    match launch_result {
         Ok(mut child) => {
             let process_id = child.id();
             let started = update_attempt(
@@ -378,7 +385,7 @@ pub async fn push_task(
         }
         Err(launch_error) => {
             let launch_message = launch_error.to_string();
-            let (delivery, message) = match platform::copy_text(&prepared.prompt) {
+            let (delivery, message) = match copy_text(&app, &prepared.prompt) {
                 Ok(()) => (
                     PushDelivery::ClipboardFallback,
                     format!("启动失败，Pointer Prompt 已复制：{launch_message}"),
@@ -410,6 +417,7 @@ pub async fn push_task(
 pub async fn test_agent_profile(
     project_id: String,
     profile_id: String,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ProfileTestOutcome, String> {
     let project = registered_project(&project_id, &state)?;
@@ -430,13 +438,16 @@ pub async fn test_agent_profile(
         .prepare(&prompt, &state.config)
         .map_err(|error| error.to_string())?;
     if prepared.launch_mode == LaunchMode::ClipboardOnly {
-        platform::copy_text(&prepared.prompt).map_err(|error| error.to_string())?;
+        copy_text(&app, &prepared.prompt).map_err(|error| error.to_string())?;
         return Ok(ProfileTestOutcome {
             profile_id,
             process_id: None,
             copied_to_clipboard: true,
             message: "只读测试 Prompt 已复制".into(),
         });
+    }
+    if prepared.prompt_transport == PromptTransport::Clipboard {
+        copy_text(&app, &prepared.prompt).map_err(|error| error.to_string())?;
     }
     let child = platform::launch(&prepared).map_err(|error| error.to_string())?;
     Ok(ProfileTestOutcome {
@@ -453,7 +464,7 @@ fn finish_clipboard_push(
     attempt: PushAttempt,
     pointer_prompt: PointerPrompt,
 ) -> Result<PushOutcome, String> {
-    match platform::copy_text(&pointer_prompt.text) {
+    match copy_text(app, &pointer_prompt.text) {
         Ok(()) => {
             let started = update_attempt(
                 state,
@@ -488,6 +499,30 @@ fn finish_clipboard_push(
             })
         }
     }
+}
+
+fn copy_text(app: &AppHandle, text: &str) -> std::io::Result<()> {
+    copy_text_with(
+        || {
+            app.clipboard()
+                .write_text(text.to_owned())
+                .map_err(std::io::Error::other)
+        },
+        || platform::copy_text(text),
+    )
+}
+
+fn copy_text_with(
+    native: impl FnOnce() -> std::io::Result<()>,
+    fallback: impl FnOnce() -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    native().or_else(|native_error| {
+        fallback().map_err(|fallback_error| {
+            std::io::Error::other(format!(
+                "native clipboard failed: {native_error}; system fallback failed: {fallback_error}"
+            ))
+        })
+    })
 }
 
 fn update_attempt(
@@ -555,4 +590,33 @@ fn registered_project(id: &str, state: &State<'_, AppState>) -> Result<Registere
         .find(|project| project.id == id)
         .cloned()
         .ok_or_else(|| format!("registered project not found: {id}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::copy_text_with;
+    use std::cell::Cell;
+    use std::io;
+
+    #[test]
+    fn native_clipboard_does_not_require_an_external_provider() {
+        let fallback_called = Cell::new(false);
+
+        copy_text_with(
+            || Ok(()),
+            || {
+                fallback_called.set(true);
+                Err(io::Error::new(io::ErrorKind::NotFound, "provider missing"))
+            },
+        )
+        .expect("native clipboard should be sufficient");
+
+        assert!(!fallback_called.get());
+    }
+
+    #[test]
+    fn external_provider_remains_a_fallback_for_native_failures() {
+        copy_text_with(|| Err(io::Error::other("native unavailable")), || Ok(()))
+            .expect("system provider should recover a native clipboard failure");
+    }
 }
