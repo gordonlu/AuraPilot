@@ -3,9 +3,7 @@ use aurapilot_core::config::CoreConfig;
 use aurapilot_core::model::{TaskLogEntry, TaskState};
 use aurapilot_core::parser::parse_task_file;
 use aurapilot_core::pointer_prompt::build_pointer_prompt;
-use aurapilot_core::task_store::{
-    CreateTaskInput, TransitionTaskInput, create_task, transition_task,
-};
+use aurapilot_core::task_store::{TransitionTaskInput, transition_task};
 use aurapilot_core::transaction::FileTransaction;
 use std::collections::BTreeMap;
 use std::fs;
@@ -116,19 +114,37 @@ fn phase_five_acceptance_runs_from_init_to_agent_claim_in_an_isolated_repository
             .contains("already registered")
     );
 
+    let create = Command::new(cli)
+        .arg("task")
+        .arg("create")
+        .arg(&repo)
+        .args([
+            "--title",
+            "Validate the first user journey",
+            "--priority",
+            "P0",
+            "--type",
+            "test",
+            "--desc",
+            "isolated acceptance task",
+            "--accept",
+            "agent claims through the protocol",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        create.status.success(),
+        "{}",
+        String::from_utf8_lossy(&create.stderr)
+    );
+    assert!(
+        String::from_utf8(create.stdout)
+            .unwrap()
+            .contains("created TASK-001 in backlog")
+    );
+
     let config = CoreConfig::default();
-    let created = create_task(
-        &repo,
-        &config,
-        CreateTaskInput {
-            title: "Validate the first user journey".into(),
-            priority: "P0".into(),
-            task_type: "test".into(),
-            desc: Some("isolated acceptance task".into()),
-            accept: vec!["agent claims through the protocol".into()],
-        },
-    )
-    .unwrap();
+    let created = parse_task_file(&repo.join(".aurapilot/tasks/backlog/TASK-001.yaml")).unwrap();
     let pointer = build_pointer_prompt(&repo, &created).unwrap();
     let opencode = built_in_profiles()
         .into_iter()

@@ -4,6 +4,7 @@ use aurapilot_core::initializer::{InitOptions, InitStatus, initialize_repository
 use aurapilot_core::model::TaskState;
 use aurapilot_core::project_registry::{ProjectRegistry, RegistryError};
 use aurapilot_core::project_scanner::scan_project;
+use aurapilot_core::task_store::{CreateTaskInput, create_task};
 use aurapilot_core::validation::SeverityProfile;
 use std::collections::VecDeque;
 use std::env;
@@ -16,12 +17,14 @@ const HELP: &str = "AuraPilot local task control plane
 Usage:
   aurapilot [--config PATH] init [PATH] [--owner NAME] [--ignore]
   aurapilot [--config PATH] add [PATH]
+  aurapilot task create [PATH] --title TITLE [OPTIONS]
   aurapilot [--config PATH] status
   aurapilot --help
 
 Commands:
   init      Initialize the .aurapilot protocol in a repository
   add       Register an initialized repository for desktop and CLI use
+  task      Create and manage repository tasks
   status    List registered projects and task counts
 
 Options:
@@ -30,6 +33,22 @@ Options:
   --ignore       Add .aurapilot/ to the repository .gitignore
   -h, --help     Show this help
   -V, --version  Show the version";
+
+const TASK_CREATE_HELP: &str = "Create a backlog task
+
+Usage:
+  aurapilot task create [PATH] --title TITLE [OPTIONS]
+
+Options:
+  --title TEXT      Task title (required)
+  --priority VALUE  P0, P1, P2, or P3 (default: P1)
+  --type VALUE      feature, bug, refactor, docs, test, or chore (default: feature)
+  --desc TEXT       Optional task description
+  --accept TEXT     Acceptance criterion; repeat for multiple criteria
+  -h, --help        Show this help";
+
+const DEFAULT_TASK_PRIORITY: &str = "P1";
+const DEFAULT_TASK_TYPE: &str = "feature";
 
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
@@ -71,9 +90,87 @@ fn run(arguments: Vec<OsString>) -> Result<(), String> {
     match command.as_str() {
         "init" => command_init(arguments, &config),
         "add" => command_add(arguments, registry, &config),
+        "task" => command_task(arguments, &config),
         "status" => command_status(arguments, registry, &config),
         _ => Err(format!("unknown command `{command}`\n\n{HELP}")),
     }
+}
+
+fn command_task(mut arguments: VecDeque<OsString>, config: &CoreConfig) -> Result<(), String> {
+    match arguments.front().and_then(|value| value.to_str()) {
+        Some("-h" | "--help") => {
+            println!("{TASK_CREATE_HELP}");
+            Ok(())
+        }
+        Some("create") => {
+            arguments.pop_front();
+            command_task_create(arguments, config)
+        }
+        Some(command) => Err(format!(
+            "unknown task command `{command}`\n\n{TASK_CREATE_HELP}"
+        )),
+        None => Err(format!("a task command is required\n\n{TASK_CREATE_HELP}")),
+    }
+}
+
+fn command_task_create(
+    mut arguments: VecDeque<OsString>,
+    config: &CoreConfig,
+) -> Result<(), String> {
+    let mut repository = None;
+    let mut title = None;
+    let mut priority = DEFAULT_TASK_PRIORITY.to_owned();
+    let mut task_type = DEFAULT_TASK_TYPE.to_owned();
+    let mut desc = None;
+    let mut accept = Vec::new();
+
+    while let Some(argument) = arguments.pop_front() {
+        match argument.to_str() {
+            Some("-h" | "--help") => {
+                println!("{TASK_CREATE_HELP}");
+                return Ok(());
+            }
+            Some("--title") => title = Some(take_utf8_value(&mut arguments, "--title")?),
+            Some("--priority") => priority = take_utf8_value(&mut arguments, "--priority")?,
+            Some("--type") => task_type = take_utf8_value(&mut arguments, "--type")?,
+            Some("--desc") => desc = Some(take_utf8_value(&mut arguments, "--desc")?),
+            Some("--accept") => accept.push(take_utf8_value(&mut arguments, "--accept")?),
+            Some(value) if value.starts_with('-') => {
+                return Err(format!("unknown task create option `{value}`"));
+            }
+            _ if repository.is_none() => repository = Some(PathBuf::from(argument)),
+            _ => return Err("task create accepts only one repository path".into()),
+        }
+    }
+
+    let repository = repository.unwrap_or_else(|| PathBuf::from("."));
+    let title = title.ok_or_else(|| "--title is required".to_string())?;
+    let task = create_task(
+        &repository,
+        config,
+        CreateTaskInput {
+            title,
+            priority,
+            task_type,
+            desc,
+            accept,
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    let id = task
+        .document
+        .id
+        .as_deref()
+        .ok_or_else(|| "created task is missing its id".to_string())?;
+    println!("created {id} in backlog: {}", task.path.display());
+    Ok(())
+}
+
+fn take_utf8_value(arguments: &mut VecDeque<OsString>, option: &str) -> Result<String, String> {
+    arguments
+        .pop_front()
+        .and_then(|value| value.into_string().ok())
+        .ok_or_else(|| format!("{option} requires UTF-8 text"))
 }
 
 fn take_global_config(arguments: &mut VecDeque<OsString>) -> Result<Option<PathBuf>, String> {
@@ -222,5 +319,64 @@ mod tests {
         ])
         .unwrap();
         assert!(repo.join(".aurapilot/AGENTS.md").is_file());
+    }
+
+    #[test]
+    fn creates_a_valid_task_with_repeated_acceptance_criteria() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo with spaces");
+        fs::create_dir(&repo).unwrap();
+        run(vec!["init".into(), repo.clone().into_os_string()]).unwrap();
+
+        run(vec![
+            "task".into(),
+            "create".into(),
+            repo.clone().into_os_string(),
+            "--title".into(),
+            "Improve Push flow".into(),
+            "--priority".into(),
+            "P2".into(),
+            "--type".into(),
+            "feature".into(),
+            "--desc".into(),
+            "Keep task creation atomic".into(),
+            "--accept".into(),
+            "first criterion".into(),
+            "--accept".into(),
+            "second criterion".into(),
+        ])
+        .unwrap();
+
+        let task = aurapilot_core::parser::parse_task_file(
+            &repo.join(".aurapilot/tasks/backlog/TASK-001.yaml"),
+        )
+        .unwrap();
+        assert_eq!(task.state, TaskState::Backlog);
+        assert_eq!(task.document.priority.as_deref(), Some("P2"));
+        assert_eq!(
+            task.document.accept,
+            ["first criterion", "second criterion"]
+        );
+    }
+
+    #[test]
+    fn task_create_requires_a_title_without_writing_a_task() {
+        let dir = tempdir().unwrap();
+        run(vec!["init".into(), dir.path().as_os_str().to_owned()]).unwrap();
+
+        let error = run(vec![
+            "task".into(),
+            "create".into(),
+            dir.path().as_os_str().to_owned(),
+        ])
+        .unwrap_err();
+
+        assert_eq!(error, "--title is required");
+        assert!(
+            fs::read_dir(dir.path().join(".aurapilot/tasks/backlog"))
+                .unwrap()
+                .next()
+                .is_none()
+        );
     }
 }

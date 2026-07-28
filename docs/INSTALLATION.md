@@ -2,7 +2,7 @@
 
 AuraPilot v0.1 ships as two local components:
 
-- `aurapilot`: the repository initialization and status CLI;
+- `aurapilot`: the repository initialization, task creation, and status CLI;
 - `aurapilot-desktop`: the Tauri desktop control plane.
 
 Neither component installs an Agent plugin, modifies global Agent configuration, or runs a background Agent service.
@@ -38,6 +38,7 @@ Linux:
 ```sh
 aurapilot init "/home/user/code/my project" --owner user
 aurapilot add "/home/user/code/my project"
+aurapilot task create "/home/user/code/my project" --title "Improve Push flow" --priority P1 --type feature --accept "User can choose a branch strategy"
 aurapilot status
 ```
 
@@ -46,10 +47,20 @@ Windows PowerShell:
 ```powershell
 aurapilot init "C:\Users\user\code\my project" --owner user
 aurapilot add "C:\Users\user\code\my project"
+aurapilot task create "C:\Users\user\code\my project" --title "Improve Push flow" --priority P1 --type feature --accept "User can choose a branch strategy"
 aurapilot status
 ```
 
 `init` creates `.aurapilot/AGENTS.md`, `project.yaml`, `schema.json`, `installation.yaml`, and the four task-state directories. Existing protocol files and tasks are preserved.
+
+`task create` creates the next available backlog task atomically. The repository path defaults to the current directory; `--priority` defaults to `P1`, `--type` defaults to `feature`, and `--accept` can be repeated:
+
+```sh
+aurapilot task create --title "Improve Push flow" \
+  --desc "Let the user choose the branch strategy" \
+  --accept "The choice is explicit" \
+  --accept "Push does not switch branches"
+```
 
 AuraPilot protocol data is tracked by Git by default. Pass `--ignore` only when the repository owner explicitly wants `.aurapilot/` added to `.gitignore`:
 
