@@ -1,7 +1,8 @@
-import { invoke, isTauri } from '@tauri-apps/api/core'
+import { isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import { defineStore } from 'pinia'
+import { invokeBackend, withBackendTimeout } from '../backend'
 import { demoSnapshots } from '../demo'
 import type {
   LocatedTask,
@@ -13,6 +14,13 @@ import type {
 } from '../types/protocol'
 
 export const PROJECT_CHANGED_EVENT = 'aurapilot://project-changed'
+
+const replaceTask = (snapshot: ProjectSnapshot | undefined, task: LocatedTask) => {
+  if (!snapshot) return
+  const index = snapshot.tasks.findIndex((item) => item.document.id === task.document.id)
+  if (index === -1) snapshot.tasks.push(task)
+  else snapshot.tasks[index] = task
+}
 
 export const useProjectsStore = defineStore('projects', {
   state: () => ({
@@ -38,8 +46,8 @@ export const useProjectsStore = defineStore('projects', {
       this.error = null
       try {
         const [projects, snapshots] = await Promise.all([
-          invoke<RegisteredProject[]>('list_projects'),
-          invoke<ProjectSnapshot[]>('scan_projects'),
+          invokeBackend<RegisteredProject[]>('list_projects'),
+          invokeBackend<ProjectSnapshot[]>('scan_projects'),
         ])
         this.projects = projects
         this.snapshots = Object.fromEntries(
@@ -60,9 +68,15 @@ export const useProjectsStore = defineStore('projects', {
       return this.register('initialize_project', path)
     },
     async register(command: 'add_project' | 'initialize_project', path: string) {
-      const project = await invoke<RegisteredProject>(command, { path })
+      const project = await invokeBackend<RegisteredProject>(command, { path })
       this.projects.push(project)
-      await this.refresh(project.id)
+      this.snapshots[project.id] = {
+        registration: project,
+        project: null,
+        tasks: [],
+        diagnostics: [],
+      }
+      this.refreshInBackground(project.id)
       return project
     },
     async chooseDirectory() {
@@ -96,8 +110,8 @@ export const useProjectsStore = defineStore('projects', {
         snapshot.tasks.push(task)
         return task
       }
-      const task = await invoke<LocatedTask>('create_task', { projectId, input })
-      await this.refresh(projectId)
+      const task = await invokeBackend<LocatedTask>('create_task', { projectId, input })
+      replaceTask(this.snapshots[projectId], task)
       return task
     },
     async update(projectId: string, taskId: string, input: TaskDraft) {
@@ -110,8 +124,8 @@ export const useProjectsStore = defineStore('projects', {
         })
         return task
       }
-      const task = await invoke<LocatedTask>('update_task', { projectId, taskId, input })
-      await this.refresh(projectId)
+      const task = await invokeBackend<LocatedTask>('update_task', { projectId, taskId, input })
+      replaceTask(this.snapshots[projectId], task)
       return task
     },
     async transition(projectId: string, taskId: string, input: TaskTransition) {
@@ -124,8 +138,8 @@ export const useProjectsStore = defineStore('projects', {
         task.document.commit = input.target === 'done' ? (input.commit ?? task.document.commit) : null
         return task
       }
-      const task = await invoke<LocatedTask>('transition_task', { projectId, taskId, input })
-      await this.refresh(projectId)
+      const task = await invokeBackend<LocatedTask>('transition_task', { projectId, taskId, input })
+      replaceTask(this.snapshots[projectId], task)
       return task
     },
     async deleteTask(projectId: string, taskId: string) {
@@ -135,27 +149,37 @@ export const useProjectsStore = defineStore('projects', {
         snapshot.tasks = snapshot.tasks.filter((item) => item.document.id !== taskId)
         return
       }
-      await invoke('delete_task', { projectId, taskId })
-      await this.refresh(projectId)
+      await invokeBackend('delete_task', { projectId, taskId })
+      const snapshot = this.snapshots[projectId]
+      if (snapshot) snapshot.tasks = snapshot.tasks.filter((item) => item.document.id !== taskId)
     },
     async remove(id: string) {
-      await invoke<RegisteredProject>('remove_project', { id })
+      await invokeBackend<RegisteredProject>('remove_project', { id })
       this.projects = this.projects.filter((project) => project.id !== id)
       delete this.snapshots[id]
     },
     async refresh(id: string) {
-      const snapshot = await invoke<ProjectSnapshot>('scan_project', { id })
+      const snapshot = await invokeBackend<ProjectSnapshot>('scan_project', { id })
       this.snapshots[id] = snapshot
+      this.error = null
+    },
+    refreshInBackground(id: string) {
+      void this.refresh(id).catch((error) => {
+        this.error = `项目后台刷新失败：${String(error)}`
+      })
     },
     async startWatching() {
       if (!isTauri() || this.stopListening) return
-      this.stopListening = await listen<ProjectChange>(PROJECT_CHANGED_EVENT, async (event) => {
-        try {
-          await this.refresh(event.payload.project_id)
-        } catch (error) {
-          this.error = String(error)
-        }
-      })
+      try {
+        this.stopListening = await withBackendTimeout(
+          listen<ProjectChange>(PROJECT_CHANGED_EVENT, (event) => {
+            this.refreshInBackground(event.payload.project_id)
+          }),
+          'listen_project_changes',
+        )
+      } catch (error) {
+        this.error = `无法启动项目监听：${String(error)}`
+      }
     },
     stopWatching() {
       this.stopListening?.()

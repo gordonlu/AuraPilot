@@ -1,5 +1,6 @@
-import { invoke, isTauri } from '@tauri-apps/api/core'
+import { isTauri } from '@tauri-apps/api/core'
 import { defineStore } from 'pinia'
+import { invokeBackend } from '../backend'
 import type {
   AgentLaunchProfile,
   AgentProfileEntry,
@@ -54,7 +55,7 @@ export const useAgentsStore = defineStore('agents', {
       this.error = null
       try {
         this.profiles = isTauri()
-          ? await invoke<AgentProfileEntry[]>('list_agent_profiles')
+          ? await invokeBackend<AgentProfileEntry[]>('list_agent_profiles')
           : demoProfiles()
       } catch (error) {
         this.error = String(error)
@@ -63,7 +64,7 @@ export const useAgentsStore = defineStore('agents', {
       }
     },
     async preview(projectId: string, taskId: string): Promise<PointerPrompt> {
-      if (isTauri()) return invoke('preview_pointer_prompt', { projectId, taskId })
+      if (isTauri()) return invokeBackend('preview_pointer_prompt', { projectId, taskId })
       return {
         task_id: taskId,
         protocol_file: '.aurapilot/AGENTS.md',
@@ -73,7 +74,7 @@ export const useAgentsStore = defineStore('agents', {
       }
     },
     async push(projectId: string, taskId: string, profileId: string): Promise<PushOutcome> {
-      if (isTauri()) return invoke('push_task', { projectId, taskId, profileId })
+      if (isTauri()) return invokeBackend('push_task', { projectId, taskId, profileId })
       const pointer_prompt = await this.preview(projectId, taskId)
       return {
         pointer_prompt,
@@ -87,8 +88,10 @@ export const useAgentsStore = defineStore('agents', {
     },
     async save(profile: AgentLaunchProfile) {
       if (isTauri()) {
-        await invoke('save_agent_profile', { profile })
-        await this.load()
+        const entry = await invokeBackend<AgentProfileEntry>('save_agent_profile', { profile })
+        const index = this.profiles.findIndex((item) => item.profile.id === entry.profile.id)
+        if (index >= 0) this.profiles[index] = entry
+        else this.profiles.push(entry)
       }
       else {
         const index = this.profiles.findIndex((item) => item.profile.id === profile.id)
@@ -99,14 +102,14 @@ export const useAgentsStore = defineStore('agents', {
     },
     async remove(id: string) {
       if (isTauri()) {
-        await invoke('delete_agent_profile', { id })
-        await this.load()
+        await invokeBackend('delete_agent_profile', { id })
+        this.profiles = this.profiles.filter((item) => item.profile.id !== id)
       }
       else this.profiles = this.profiles.filter((item) => item.profile.id !== id)
     },
     async test(projectId: string, profileId: string) {
       if (!isTauri()) return { message: '只读测试已启动（演示）' }
-      return invoke<{ message: string }>('test_agent_profile', { projectId, profileId })
+      return invokeBackend<{ message: string }>('test_agent_profile', { projectId, profileId })
     },
   },
 })

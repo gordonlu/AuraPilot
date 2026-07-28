@@ -15,12 +15,16 @@ const error = ref<string | null>(null)
 const selectedEntry = computed(() => agents.profiles.find((entry) => entry.profile.id === selected.value))
 
 onMounted(async () => {
-  await agents.load()
-  selected.value = agents.profiles.find((entry) => entry.profile.id === props.project.registration.last_profile_id)?.profile.id
-    ?? agents.profiles.find((entry) => entry.availability.available && entry.profile.id !== 'clipboard-only')?.profile.id
-    ?? agents.profiles.find((entry) => entry.profile.id === 'clipboard-only')?.profile.id
-    ?? ''
-  if (props.task.document.id) preview.value = await agents.preview(props.project.registration.id, props.task.document.id)
+  try {
+    await agents.load()
+    selected.value = agents.profiles.find((entry) => entry.profile.id === props.project.registration.last_profile_id)?.profile.id
+      ?? agents.profiles.find((entry) => entry.availability.available && entry.profile.id !== 'clipboard-only')?.profile.id
+      ?? agents.profiles.find((entry) => entry.profile.id === 'clipboard-only')?.profile.id
+      ?? ''
+    if (props.task.document.id) preview.value = await agents.preview(props.project.registration.id, props.task.document.id)
+  } catch (caught) {
+    error.value = `无法准备 Push：${String(caught)}`
+  }
 })
 
 const push = async () => {

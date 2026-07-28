@@ -25,18 +25,21 @@ use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 #[tauri::command]
-pub fn list_projects(state: State<'_, AppState>) -> Result<Vec<RegisteredProject>, String> {
+pub async fn list_projects(state: State<'_, AppState>) -> Result<Vec<RegisteredProject>, String> {
     let registry = state.registry.lock().map_err(|error| error.to_string())?;
     Ok(registry.projects().to_vec())
 }
 
 #[tauri::command]
-pub fn add_project(path: PathBuf, state: State<'_, AppState>) -> Result<RegisteredProject, String> {
+pub async fn add_project(
+    path: PathBuf,
+    state: State<'_, AppState>,
+) -> Result<RegisteredProject, String> {
     register_project(&path, &state)
 }
 
 #[tauri::command]
-pub fn initialize_project(
+pub async fn initialize_project(
     path: PathBuf,
     state: State<'_, AppState>,
 ) -> Result<RegisteredProject, String> {
@@ -57,14 +60,19 @@ fn register_project(path: &std::path::Path, state: &AppState) -> Result<Register
         .watch_project(&project);
     if let Err(error) = watch_result {
         let mut registry = state.registry.lock().map_err(|error| error.to_string())?;
-        let _ = registry.remove(project.id);
+        if let Err(rollback_error) = registry.remove(project.id) {
+            eprintln!("failed to roll back project registration: {rollback_error}");
+        }
         return Err(error.to_string());
     }
     Ok(project)
 }
 
 #[tauri::command]
-pub fn remove_project(id: String, state: State<'_, AppState>) -> Result<RegisteredProject, String> {
+pub async fn remove_project(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<RegisteredProject, String> {
     let id = Uuid::parse_str(&id).map_err(|error| error.to_string())?;
     let project = {
         let registry = state.registry.lock().map_err(|error| error.to_string())?;
@@ -92,18 +100,21 @@ pub fn remove_project(id: String, state: State<'_, AppState>) -> Result<Register
     match remove_result {
         Ok(removed) => Ok(removed),
         Err(error) => {
-            let _ = state
+            if let Err(rollback_error) = state
                 .watchers
                 .lock()
                 .map_err(|error| error.to_string())?
-                .watch_project(&project);
+                .watch_project(&project)
+            {
+                eprintln!("failed to restore project watcher: {rollback_error}");
+            }
             Err(error.to_string())
         }
     }
 }
 
 #[tauri::command]
-pub fn scan_projects(state: State<'_, AppState>) -> Result<Vec<ProjectSnapshot>, String> {
+pub async fn scan_projects(state: State<'_, AppState>) -> Result<Vec<ProjectSnapshot>, String> {
     let projects = state
         .registry
         .lock()
@@ -118,7 +129,10 @@ pub fn scan_projects(state: State<'_, AppState>) -> Result<Vec<ProjectSnapshot>,
 }
 
 #[tauri::command]
-pub fn scan_project(id: String, state: State<'_, AppState>) -> Result<ProjectSnapshot, String> {
+pub async fn scan_project(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<ProjectSnapshot, String> {
     let id = Uuid::parse_str(&id).map_err(|error| error.to_string())?;
     let project = state
         .registry
@@ -137,7 +151,7 @@ pub fn scan_project(id: String, state: State<'_, AppState>) -> Result<ProjectSna
 }
 
 #[tauri::command]
-pub fn create_task(
+pub async fn create_task(
     project_id: String,
     input: CreateTaskInput,
     state: State<'_, AppState>,
@@ -147,7 +161,7 @@ pub fn create_task(
 }
 
 #[tauri::command]
-pub fn update_task(
+pub async fn update_task(
     project_id: String,
     task_id: String,
     input: UpdateTaskInput,
@@ -158,7 +172,7 @@ pub fn update_task(
 }
 
 #[tauri::command]
-pub fn transition_task(
+pub async fn transition_task(
     project_id: String,
     task_id: String,
     input: TransitionTaskInput,
@@ -169,7 +183,7 @@ pub fn transition_task(
 }
 
 #[tauri::command]
-pub fn delete_task(
+pub async fn delete_task(
     project_id: String,
     task_id: String,
     state: State<'_, AppState>,
@@ -203,7 +217,9 @@ pub struct ProfileTestOutcome {
 }
 
 #[tauri::command]
-pub fn list_agent_profiles(state: State<'_, AppState>) -> Result<Vec<AgentProfileEntry>, String> {
+pub async fn list_agent_profiles(
+    state: State<'_, AppState>,
+) -> Result<Vec<AgentProfileEntry>, String> {
     let profiles = state.profiles.lock().map_err(|error| error.to_string())?;
     Ok(profiles
         .all_profiles()
@@ -217,20 +233,25 @@ pub fn list_agent_profiles(state: State<'_, AppState>) -> Result<Vec<AgentProfil
 }
 
 #[tauri::command]
-pub fn save_agent_profile(
+pub async fn save_agent_profile(
     profile: AgentLaunchProfile,
     state: State<'_, AppState>,
-) -> Result<AgentLaunchProfile, String> {
-    state
+) -> Result<AgentProfileEntry, String> {
+    let profile = state
         .profiles
         .lock()
         .map_err(|error| error.to_string())?
         .save(profile)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    Ok(AgentProfileEntry {
+        built_in: false,
+        availability: profile_availability(&profile),
+        profile,
+    })
 }
 
 #[tauri::command]
-pub fn delete_agent_profile(
+pub async fn delete_agent_profile(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<AgentLaunchProfile, String> {
@@ -259,7 +280,7 @@ pub fn delete_agent_profile(
 }
 
 #[tauri::command]
-pub fn preview_pointer_prompt(
+pub async fn preview_pointer_prompt(
     project_id: String,
     task_id: String,
     state: State<'_, AppState>,
@@ -270,7 +291,7 @@ pub fn preview_pointer_prompt(
 }
 
 #[tauri::command]
-pub fn list_push_attempts(state: State<'_, AppState>) -> Result<Vec<PushAttempt>, String> {
+pub async fn list_push_attempts(state: State<'_, AppState>) -> Result<Vec<PushAttempt>, String> {
     Ok(state
         .push_attempts
         .lock()
@@ -280,7 +301,7 @@ pub fn list_push_attempts(state: State<'_, AppState>) -> Result<Vec<PushAttempt>
 }
 
 #[tauri::command]
-pub fn push_task(
+pub async fn push_task(
     project_id: String,
     task_id: String,
     profile_id: String,
@@ -312,7 +333,7 @@ pub fn push_task(
         .map_err(|error| error.to_string())?
         .requested(project.id, &task_id, &profile_id)
         .map_err(|error| error.to_string())?;
-    let _ = app.emit(PUSH_ATTEMPT_EVENT, &attempt);
+    emit_or_log(&app, PUSH_ATTEMPT_EVENT, &attempt);
 
     if prepared.launch_mode == LaunchMode::ClipboardOnly {
         return finish_clipboard_push(&state, &app, attempt, pointer_prompt);
@@ -329,22 +350,24 @@ pub fn push_task(
                 None,
                 PushDelivery::Process,
             )?;
-            let _ = app.emit(PUSH_ATTEMPT_EVENT, &started);
+            emit_or_log(&app, PUSH_ATTEMPT_EVENT, &started);
             let attempts = state.push_attempts.clone();
             let app_handle = app.clone();
             std::thread::spawn(move || {
                 let wait_result = child.wait();
                 let error = wait_result.err().map(|error| error.to_string());
-                if let Ok(mut store) = attempts.lock()
-                    && let Ok(exited) = store.update(
+                match attempts.lock() {
+                    Ok(mut store) => match store.update(
                         started.id,
                         PushAttemptStatus::Exited,
                         Some(process_id),
                         error,
                         PushDelivery::Process,
-                    )
-                {
-                    let _ = app_handle.emit(PUSH_ATTEMPT_EVENT, exited);
+                    ) {
+                        Ok(exited) => emit_or_log(&app_handle, PUSH_ATTEMPT_EVENT, &exited),
+                        Err(error) => eprintln!("failed to persist process exit: {error}"),
+                    },
+                    Err(error) => eprintln!("push attempt store lock poisoned: {error}"),
                 }
             });
             Ok(PushOutcome {
@@ -373,7 +396,7 @@ pub fn push_task(
                 Some(launch_message),
                 delivery,
             )?;
-            let _ = app.emit(PUSH_ATTEMPT_EVENT, &failed);
+            emit_or_log(&app, PUSH_ATTEMPT_EVENT, &failed);
             Ok(PushOutcome {
                 attempt: failed,
                 pointer_prompt,
@@ -384,7 +407,7 @@ pub fn push_task(
 }
 
 #[tauri::command]
-pub fn test_agent_profile(
+pub async fn test_agent_profile(
     project_id: String,
     profile_id: String,
     state: State<'_, AppState>,
@@ -440,7 +463,7 @@ fn finish_clipboard_push(
                 None,
                 PushDelivery::Clipboard,
             )?;
-            let _ = app.emit(PUSH_ATTEMPT_EVENT, &started);
+            emit_or_log(app, PUSH_ATTEMPT_EVENT, &started);
             Ok(PushOutcome {
                 attempt: started,
                 pointer_prompt,
@@ -457,7 +480,7 @@ fn finish_clipboard_push(
                 Some(message.clone()),
                 PushDelivery::Clipboard,
             )?;
-            let _ = app.emit(PUSH_ATTEMPT_EVENT, &failed);
+            emit_or_log(app, PUSH_ATTEMPT_EVENT, &failed);
             Ok(PushOutcome {
                 attempt: failed,
                 pointer_prompt,
@@ -481,6 +504,12 @@ fn update_attempt(
         .map_err(|error| error.to_string())?
         .update(id, status, process_id, error, delivery)
         .map_err(|error| error.to_string())
+}
+
+fn emit_or_log<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: &T) {
+    if let Err(error) = app.emit(event, payload) {
+        eprintln!("failed to emit {event}: {error}");
+    }
 }
 
 fn profile_availability(profile: &AgentLaunchProfile) -> platform::ExecutableAvailability {

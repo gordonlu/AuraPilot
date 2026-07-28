@@ -120,6 +120,9 @@ const deleteTask = async () => {
   try { await projectsStore.deleteTask(selected.value.projectId, selected.value.taskId); closeOverlays(); lastRefresh.value = new Date() }
   catch (error) { actionError.value = String(error) } finally { busy.value = false }
 }
+const retryProjectSync = async () => {
+  await projectsStore.load()
+}
 const onKeydown = (event: KeyboardEvent) => {
   const target = event.target as HTMLElement
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
@@ -169,6 +172,12 @@ onBeforeUnmount(() => { projectsStore.stopWatching(); window.removeEventListener
         <button class="button primary" :disabled="!allSnapshots.length" @click="modal = 'create'"><UiIcon name="plus"/>新建任务</button>
       </header>
 
+      <div v-if="projectsStore.error" class="runtime-error" role="alert">
+        <UiIcon name="alert" :size="15"/>
+        <span>{{ projectsStore.error }}</span>
+        <button @click="retryProjectSync">重新扫描</button>
+      </div>
+
       <div class="main-surface">
         <div v-if="projectsStore.loading" class="loading-state"><span/><p>正在扫描项目协议…</p></div>
         <EmptyState v-else-if="!allSnapshots.length" @add="openAddProject" />
@@ -176,7 +185,7 @@ onBeforeUnmount(() => { projectsStore.stopWatching(); window.removeEventListener
         <BlockedView v-else :snapshots="visibleSnapshots" :search="search" @open="selectTask" @back="activeView = 'board'" />
       </div>
 
-      <footer class="status-bar"><span class="live"><i/>Watcher 实时监控中</span><span>项目 {{ visibleSnapshots.length }}</span><span>任务 {{ taskCount }}</span><span>最后刷新 {{ lastRefresh.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span><button v-if="diagnosticCount" @click="showDiagnostics = true"><UiIcon name="alert" :size="14"/>{{ diagnosticCount }} 条诊断</button></footer>
+      <footer class="status-bar"><span class="live"><i :class="{ warning: projectsStore.error }"/>{{ projectsStore.error ? '同步需要处理' : 'Watcher 实时监控中' }}</span><span>项目 {{ visibleSnapshots.length }}</span><span>任务 {{ taskCount }}</span><span>最后刷新 {{ lastRefresh.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span><button v-if="diagnosticCount" @click="showDiagnostics = true"><UiIcon name="alert" :size="14"/>{{ diagnosticCount }} 条诊断</button></footer>
     </main>
 
     <TaskDrawer

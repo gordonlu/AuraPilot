@@ -21,7 +21,9 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let state = AppState::load(move |change| {
-                let _ = handle.emit(PROJECT_CHANGED_EVENT, change);
+                if let Err(error) = handle.emit(PROJECT_CHANGED_EVENT, change) {
+                    eprintln!("failed to emit project change: {error}");
+                }
             })?;
             app.manage(state);
             Ok(())

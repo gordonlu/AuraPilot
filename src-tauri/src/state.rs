@@ -25,8 +25,13 @@ impl AppState {
         let push_attempts = PushAttemptStore::load(push_attempt_path()?, config.clone())?;
         let mut watchers = ProjectWatchService::new(&config, on_change)?;
         for project in registry.projects() {
-            if project.path.join(".aurapilot").is_dir() {
-                let _ = watchers.watch_project(project);
+            if project.path.join(".aurapilot").is_dir()
+                && let Err(error) = watchers.watch_project(project)
+            {
+                eprintln!(
+                    "failed to watch registered project {}: {error}",
+                    project.path.display()
+                );
             }
         }
         Ok(Self {

@@ -69,10 +69,10 @@ describe('projects store', () => {
     expect(listen).toHaveBeenCalledWith(PROJECT_CHANGED_EVENT, expect.any(Function))
     await handler?.({ payload: { project_id: 'project-1' } })
     expect(invoke).toHaveBeenCalledWith('scan_project', { id: 'project-1' })
-    expect(store.snapshots['project-1']).toEqual(snapshot)
+    await vi.waitFor(() => expect(store.snapshots['project-1']).toEqual(snapshot))
   })
 
-  it('routes task CRUD through explicit Tauri commands and refreshes the project', async () => {
+  it('routes task CRUD through explicit Tauri commands and updates the local snapshot', async () => {
     const project = { id: 'project-1', path: '/repo', registered_at: '2026-07-28T00:00:00Z' }
     const task = { path: '/repo/.aurapilot/tasks/backlog/TASK-001.yaml', state: 'backlog', document: { id: 'TASK-001' } }
     const snapshot = { registration: project, project: null, tasks: [task], diagnostics: [] }
@@ -90,5 +90,48 @@ describe('projects store', () => {
     expect(invoke).toHaveBeenCalledWith('update_task', { projectId: 'project-1', taskId: 'TASK-001', input: draft })
     expect(invoke).toHaveBeenCalledWith('transition_task', expect.objectContaining({ projectId: 'project-1', taskId: 'TASK-001' }))
     expect(invoke).toHaveBeenCalledWith('delete_task', { projectId: 'project-1', taskId: 'TASK-001' })
+  })
+
+  it('finishes task creation without waiting for a follow-up project scan', async () => {
+    const project = { id: 'project-1', path: '/repo', registered_at: '2026-07-28T00:00:00Z' }
+    const task = {
+      path: '/repo/.aurapilot/tasks/backlog/TASK-001.yaml',
+      state: 'backlog',
+      document: { id: 'TASK-001', title: 'Task' },
+    }
+    const snapshot = { registration: project, project: null, tasks: [], diagnostics: [] }
+    invoke.mockImplementation((command: string) => {
+      if (command === 'create_task') return Promise.resolve(task)
+      if (command === 'scan_project') return new Promise(() => undefined)
+      return Promise.resolve(undefined)
+    })
+    const store = useProjectsStore()
+    store.snapshots['project-1'] = snapshot as never
+
+    await expect(store.create('project-1', {
+      title: 'Task', priority: 'P1', task_type: 'feature', desc: null, accept: [],
+    })).resolves.toEqual(task)
+
+    expect(store.snapshots['project-1'].tasks).toEqual([task])
+    expect(invoke).not.toHaveBeenCalledWith('scan_project', expect.anything())
+  })
+
+  it('finishes project registration while its initial scan continues in the background', async () => {
+    const project = { id: 'project-1', path: '/repo', registered_at: '2026-07-28T00:00:00Z' }
+    const scanned = { registration: project, project: null, tasks: [], diagnostics: [] }
+    let finishScan: ((snapshot: typeof scanned) => void) | undefined
+    const pendingScan = new Promise<typeof scanned>((resolve) => { finishScan = resolve })
+    invoke.mockImplementation((command: string) => command === 'add_project'
+      ? Promise.resolve(project)
+      : pendingScan)
+    const store = useProjectsStore()
+
+    await expect(store.add('/repo')).resolves.toEqual(project)
+
+    expect(store.projects).toEqual([project])
+    expect(store.snapshots['project-1']).toMatchObject({ registration: project, tasks: [] })
+    expect(invoke).toHaveBeenCalledWith('scan_project', { id: 'project-1' })
+    finishScan?.(scanned)
+    await pendingScan
   })
 })
