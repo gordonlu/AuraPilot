@@ -225,6 +225,7 @@ mod tests {
             id: Uuid::new_v4(),
             path: repo.clone(),
             registered_at: Utc::now().to_rfc3339(),
+            last_profile_id: None,
         };
         let config = CoreConfig::default();
         let (tx, rx) = mpsc::channel();

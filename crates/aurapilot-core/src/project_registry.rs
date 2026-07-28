@@ -14,6 +14,8 @@ pub struct RegisteredProject {
     pub id: Uuid,
     pub path: PathBuf,
     pub registered_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_profile_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -88,6 +90,7 @@ impl ProjectRegistry {
             id: Uuid::new_v4(),
             path: canonical,
             registered_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+            last_profile_id: None,
         };
         let mut next = self.document.clone();
         next.projects.push(project.clone());
@@ -113,6 +116,24 @@ impl ProjectRegistry {
     pub fn reload(&mut self) -> Result<(), RegistryError> {
         *self = Self::load(self.path.clone(), self.config.clone())?;
         Ok(())
+    }
+
+    pub fn set_last_profile(
+        &mut self,
+        id: Uuid,
+        profile_id: Option<String>,
+    ) -> Result<RegisteredProject, RegistryError> {
+        let mut next = self.document.clone();
+        let project = next
+            .projects
+            .iter_mut()
+            .find(|project| project.id == id)
+            .ok_or(RegistryError::NotFound(id))?;
+        project.last_profile_id = profile_id;
+        let updated = project.clone();
+        persist_document(&self.path, &next)?;
+        self.document = next;
+        Ok(updated)
     }
 }
 
@@ -166,7 +187,16 @@ mod tests {
 
         let mut loaded = ProjectRegistry::load(&registry_path, CoreConfig::default()).unwrap();
         assert_eq!(loaded.projects(), std::slice::from_ref(&added));
-        assert_eq!(loaded.remove(added.id).unwrap(), added);
+        let updated = loaded
+            .set_last_profile(added.id, Some("opencode-review".into()))
+            .unwrap();
+        assert_eq!(updated.last_profile_id.as_deref(), Some("opencode-review"));
+        let reloaded = ProjectRegistry::load(&registry_path, CoreConfig::default()).unwrap();
+        assert_eq!(
+            reloaded.projects()[0].last_profile_id.as_deref(),
+            Some("opencode-review")
+        );
+        assert_eq!(loaded.remove(added.id).unwrap(), updated);
         assert!(loaded.projects().is_empty());
     }
 

@@ -15,6 +15,12 @@ pub struct CoreConfig {
     pub registry_format_version: u32,
     pub watcher_debounce: Duration,
     pub watcher_delivery_timeout: Duration,
+    pub profile_format_version: u32,
+    pub push_attempt_format_version: u32,
+    pub push_attempt_retention: usize,
+    pub max_profile_args: usize,
+    pub max_profile_value_bytes: usize,
+    pub max_profile_id_bytes: usize,
 }
 
 impl Default for CoreConfig {
@@ -30,6 +36,12 @@ impl Default for CoreConfig {
             registry_format_version: 1,
             watcher_debounce: Duration::from_millis(100),
             watcher_delivery_timeout: Duration::from_secs(2),
+            profile_format_version: 1,
+            push_attempt_format_version: 1,
+            push_attempt_retention: 100,
+            max_profile_args: 64,
+            max_profile_value_bytes: 16_384,
+            max_profile_id_bytes: 64,
         }
     }
 }
@@ -49,5 +61,11 @@ mod tests {
         assert_eq!(config.registry_format_version, 1);
         assert_eq!(config.watcher_debounce, Duration::from_millis(100));
         assert_eq!(config.watcher_delivery_timeout, Duration::from_secs(2));
+        assert_eq!(config.profile_format_version, 1);
+        assert_eq!(config.push_attempt_format_version, 1);
+        assert_eq!(config.push_attempt_retention, 100);
+        assert_eq!(config.max_profile_args, 64);
+        assert_eq!(config.max_profile_value_bytes, 16_384);
+        assert_eq!(config.max_profile_id_bytes, 64);
     }
 }

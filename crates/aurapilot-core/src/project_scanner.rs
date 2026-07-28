@@ -219,6 +219,7 @@ mod tests {
             id: Uuid::new_v4(),
             path: path.to_path_buf(),
             registered_at: Utc::now().to_rfc3339(),
+            last_profile_id: None,
         }
     }
 

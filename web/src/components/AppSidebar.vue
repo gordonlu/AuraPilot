@@ -16,6 +16,7 @@ defineEmits<{
   add: []
   theme: []
   diagnostics: []
+  profiles: []
 }>()
 </script>
 
@@ -59,6 +60,9 @@ defineEmits<{
     </nav>
 
     <div class="sidebar-footer">
+      <button class="footer-control" @click="$emit('profiles')">
+        <UiIcon name="terminal"/><span>Agent Profiles</span>
+      </button>
       <button class="footer-control" @click="$emit('theme')">
         <UiIcon :name="theme === 'dark' ? 'moon' : 'sun'"/><span>{{ theme === 'dark' ? '暗色模式' : '浅色模式' }}</span>
       </button>

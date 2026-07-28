@@ -1,5 +1,7 @@
 # AuraPilot
 
+**One task protocol. Any coding agent. All your repositories.**
+
 AuraPilot is a local-first, cross-repository task control plane for AI coding agents.
 
 ## Workspace

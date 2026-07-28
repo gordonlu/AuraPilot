@@ -13,6 +13,7 @@ export interface RegisteredProject {
   id: string
   path: string
   registered_at: string
+  last_profile_id?: string | null
 }
 
 export interface ProjectDocument {
@@ -87,4 +88,62 @@ export interface TaskTransition {
   pr?: number | null
   waiting?: string | null
   commit?: string | null
+}
+
+export type LaunchMode = 'interactive_terminal' | 'headless_process' | 'clipboard_only'
+export type PromptTransport = 'argument' | 'stdin' | 'clipboard'
+
+export type WorkingDirectory = { kind: 'repository' } | { kind: 'fixed_path'; path: string }
+
+export interface AgentLaunchProfile {
+  id: string
+  display_name: string
+  executable: string
+  args: string[]
+  working_directory: WorkingDirectory
+  launch_mode: LaunchMode
+  prompt_transport: PromptTransport
+  detect_commands: string[]
+  show_terminal: boolean
+}
+
+export interface ExecutableAvailability {
+  available: boolean
+  resolved_path: string | null
+  detail: string
+}
+
+export interface AgentProfileEntry {
+  profile: AgentLaunchProfile
+  built_in: boolean
+  availability: ExecutableAvailability
+}
+
+export interface PointerPrompt {
+  task_id: string
+  protocol_file: string
+  task_file: string
+  repository: string
+  text: string
+}
+
+export type PushAttemptStatus = 'requested' | 'started' | 'failed_to_start' | 'exited'
+export type PushDelivery = 'process' | 'clipboard' | 'clipboard_fallback'
+
+export interface PushAttempt {
+  id: string
+  task_id: string
+  project_id: string
+  agent_profile_id: string
+  created_at: string
+  status: PushAttemptStatus
+  process_id: number | null
+  error: string | null
+  delivery: PushDelivery
+}
+
+export interface PushOutcome {
+  attempt: PushAttempt
+  pointer_prompt: PointerPrompt
+  message: string
 }

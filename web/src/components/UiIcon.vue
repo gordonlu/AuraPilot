@@ -54,6 +54,12 @@ defineProps<{ name: string; size?: number }>()
     <template v-else-if="name === 'check'">
       <path d="m5 12 4 4L19 6"/>
     </template>
+    <template v-else-if="name === 'send'">
+      <path d="m3 11 18-8-7 18-3-7-8-3Z"/><path d="m11 14 4-5"/>
+    </template>
+    <template v-else-if="name === 'terminal'">
+      <rect x="3" y="5" width="18" height="14" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>
+    </template>
     <template v-else-if="name === 'chevron'">
       <path d="m9 18 6-6-6-6"/>
     </template>

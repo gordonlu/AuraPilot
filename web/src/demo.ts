@@ -1,9 +1,9 @@
 import type { ProjectSnapshot, RegisteredProject, TaskDocument, TaskState } from './types/protocol'
 
 const projects: RegisteredProject[] = [
-  { id: 'demo-aura', path: '/workspace/aurapilot', registered_at: '2026-07-28T08:00:00Z' },
-  { id: 'demo-core', path: '/workspace/server-core', registered_at: '2026-07-28T08:05:00Z' },
-  { id: 'demo-web', path: '/workspace/web-dashboard', registered_at: '2026-07-28T08:10:00Z' },
+  { id: 'demo-aura', path: '/workspace/aurapilot', registered_at: '2026-07-28T08:00:00Z', last_profile_id: 'opencode' },
+  { id: 'demo-core', path: '/workspace/server-core', registered_at: '2026-07-28T08:05:00Z', last_profile_id: null },
+  { id: 'demo-web', path: '/workspace/web-dashboard', registered_at: '2026-07-28T08:10:00Z', last_profile_id: null },
 ]
 
 const task = (

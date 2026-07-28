@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import AddProjectModal from './components/AddProjectModal.vue'
+import AgentProfilesModal from './components/AgentProfilesModal.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import BlockedView from './components/BlockedView.vue'
 import BoardView from './components/BoardView.vue'
@@ -9,6 +10,7 @@ import DiagnosticsPanel from './components/DiagnosticsPanel.vue'
 import EmptyState from './components/EmptyState.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
 import TaskFormModal from './components/TaskFormModal.vue'
+import PushTaskModal from './components/PushTaskModal.vue'
 import UiIcon from './components/UiIcon.vue'
 import { useProjectsStore } from './stores/projects'
 import type { LocatedTask, TaskDraft, TaskTransition } from './types/protocol'
@@ -19,7 +21,7 @@ const activeView = ref<'board' | 'blocked'>('board')
 const search = ref('')
 const theme = ref<'dark' | 'light'>((localStorage.getItem('aurapilot-theme') as 'dark' | 'light') || 'dark')
 const selected = ref<{ projectId: string; taskId: string } | null>(null)
-const modal = ref<'create' | 'edit' | 'add-project' | 'delete' | null>(null)
+const modal = ref<'create' | 'edit' | 'add-project' | 'delete' | 'push' | 'profiles' | null>(null)
 const showDiagnostics = ref(false)
 const busy = ref(false)
 const actionError = ref<string | null>(null)
@@ -107,7 +109,7 @@ onBeforeUnmount(() => { projectsStore.stopWatching(); window.removeEventListener
       :snapshots="allSnapshots" :active-project="activeProject" :active-view="activeView"
       :theme="theme" :diagnostic-count="diagnosticCount"
       @project="activeProject = $event" @view="activeView = $event" @add="modal = 'add-project'"
-      @theme="toggleTheme" @diagnostics="showDiagnostics = !showDiagnostics"
+      @theme="toggleTheme" @diagnostics="showDiagnostics = !showDiagnostics" @profiles="modal = 'profiles'"
     />
     <main class="workspace">
       <header class="app-toolbar">
@@ -130,7 +132,7 @@ onBeforeUnmount(() => { projectsStore.stopWatching(); window.removeEventListener
     <TaskDrawer
       v-if="selectedTask && selectedProject" :task="selectedTask" :project="selectedProject"
       :diagnostics="selectedDiagnostics" :busy="busy" :error="actionError"
-      @close="selected = null" @edit="modal = 'edit'" @delete="modal = 'delete'" @transition="transitionTask"
+      @close="selected = null" @edit="modal = 'edit'" @delete="modal = 'delete'" @push="modal = 'push'" @transition="transitionTask"
     />
     <DiagnosticsPanel v-if="showDiagnostics" :snapshots="visibleSnapshots" @close="showDiagnostics = false" />
     <TaskFormModal
@@ -140,6 +142,8 @@ onBeforeUnmount(() => { projectsStore.stopWatching(); window.removeEventListener
       @close="modal = null; actionError = null" @save="saveTask"
     />
     <AddProjectModal v-if="modal === 'add-project'" :busy="busy" :error="actionError" @close="modal = null; actionError = null" @add="addProject" />
+    <PushTaskModal v-if="modal === 'push' && selectedTask && selectedProject" :task="selectedTask" :project="selectedProject" @close="modal = null" />
+    <AgentProfilesModal v-if="modal === 'profiles'" :projects="allSnapshots" @close="modal = null" />
     <ConfirmDialog
       v-if="modal === 'delete' && selectedTask" title="删除任务？"
       :message="`${selectedTask.document.id} 将从 .aurapilot 中永久删除。项目内其他文件不会受影响。`"

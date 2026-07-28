@@ -10,7 +10,7 @@ const props = defineProps<{
   busy?: boolean
   error?: string | null
 }>()
-const emit = defineEmits<{ close: []; edit: []; delete: []; transition: [input: TaskTransition] }>()
+const emit = defineEmits<{ close: []; edit: []; delete: []; push: []; transition: [input: TaskTransition] }>()
 
 const transition = reactive({ target: '' as TaskState | '', assigned: '', branch: '', commit: '' })
 watch(() => props.task.path, () => {
@@ -58,6 +58,6 @@ const confirmTransition = () => {
         <p v-if="error" class="form-error">{{ error }}</p>
       </section>
     </div>
-    <footer class="drawer-footer"><button class="button secondary" @click="$emit('edit')"><UiIcon name="edit"/>编辑</button><button class="button danger" @click="$emit('delete')"><UiIcon name="trash"/>删除任务</button><button class="button primary" @click="$emit('close')">关闭</button></footer>
+    <footer class="drawer-footer"><button class="button secondary" @click="$emit('edit')"><UiIcon name="edit"/>编辑</button><button class="button danger" @click="$emit('delete')"><UiIcon name="trash"/>删除任务</button><button v-if="task.state === 'backlog'" class="button primary" @click="$emit('push')"><UiIcon name="send"/>Push</button><button v-else class="button primary" @click="$emit('close')">关闭</button></footer>
   </aside>
 </template>
