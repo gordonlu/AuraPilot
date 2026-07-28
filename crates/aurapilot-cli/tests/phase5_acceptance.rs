@@ -27,6 +27,20 @@ const BOOTSTRAP_REFERENCE: &str = "<!-- aurapilot:start -->
 <!-- aurapilot:end -->";
 
 #[test]
+fn bootstrap_guide_uses_the_cli_and_keeps_the_protocol_agents_file_scoped() {
+    let guide = include_str!("../../../docs/BOOTSTRAP.md");
+    let init = guide.find("aurapilot init .").unwrap();
+    let add = guide.find("aurapilot add .").unwrap();
+
+    assert!(
+        init < add,
+        "registration must follow protocol initialization"
+    );
+    assert!(guide.contains("`.aurapilot/AGENTS.md` 是完整的 Agent 工作协议"));
+    assert!(guide.contains("仓库根目录的 `AGENTS.md` 只保存"));
+}
+
+#[test]
 fn phase_five_acceptance_runs_from_init_to_agent_claim_in_an_isolated_repository() {
     let sandbox = tempdir().unwrap();
     let repo = sandbox.path().join("真实 项目 with spaces");
@@ -87,6 +101,19 @@ fn phase_five_acceptance_runs_from_init_to_agent_claim_in_an_isolated_repository
         add.status.success(),
         "{}",
         String::from_utf8_lossy(&add.stderr)
+    );
+    let repeated_add = Command::new(cli)
+        .arg("--config")
+        .arg(&registry)
+        .arg("add")
+        .arg(&repo)
+        .output()
+        .unwrap();
+    assert!(repeated_add.status.success());
+    assert!(
+        String::from_utf8(repeated_add.stdout)
+            .unwrap()
+            .contains("already registered")
     );
 
     let config = CoreConfig::default();

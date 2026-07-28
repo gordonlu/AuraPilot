@@ -2,7 +2,7 @@ use aurapilot_core::app_paths::registry_path;
 use aurapilot_core::config::CoreConfig;
 use aurapilot_core::initializer::{InitOptions, InitStatus, initialize_repository};
 use aurapilot_core::model::TaskState;
-use aurapilot_core::project_registry::ProjectRegistry;
+use aurapilot_core::project_registry::{ProjectRegistry, RegistryError};
 use aurapilot_core::project_scanner::scan_project;
 use aurapilot_core::validation::SeverityProfile;
 use std::collections::VecDeque;
@@ -156,8 +156,13 @@ fn command_add(
     }
     let mut registry =
         ProjectRegistry::load(registry_path, config.clone()).map_err(|error| error.to_string())?;
-    let project = registry.add(&path).map_err(|error| error.to_string())?;
-    println!("registered {} ({})", project.path.display(), project.id);
+    match registry.add(&path) {
+        Ok(project) => println!("registered {} ({})", project.path.display(), project.id),
+        Err(RegistryError::Duplicate(path)) => {
+            println!("already registered {}", path.display());
+        }
+        Err(error) => return Err(error.to_string()),
+    }
     Ok(())
 }
 

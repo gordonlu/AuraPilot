@@ -1,5 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { open } from '@tauri-apps/plugin-dialog'
 import { defineStore } from 'pinia'
 import { demoSnapshots } from '../demo'
 import type {
@@ -52,10 +53,26 @@ export const useProjectsStore = defineStore('projects', {
     },
     async add(path: string) {
       if (!isTauri()) throw new Error('添加本地项目仅在桌面应用中可用')
-      const project = await invoke<RegisteredProject>('add_project', { path })
+      return this.register('add_project', path)
+    },
+    async initialize(path: string) {
+      if (!isTauri()) throw new Error('初始化本地项目仅在桌面应用中可用')
+      return this.register('initialize_project', path)
+    },
+    async register(command: 'add_project' | 'initialize_project', path: string) {
+      const project = await invoke<RegisteredProject>(command, { path })
       this.projects.push(project)
       await this.refresh(project.id)
       return project
+    },
+    async chooseDirectory() {
+      if (!isTauri()) throw new Error('目录选择仅在桌面应用中可用')
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: '选择要接入 AuraPilot 的代码仓库',
+      })
+      return typeof selected === 'string' ? selected : null
     },
     async create(projectId: string, input: TaskDraft) {
       if (!isTauri()) {

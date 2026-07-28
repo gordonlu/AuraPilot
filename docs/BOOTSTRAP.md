@@ -27,8 +27,8 @@ AuraPilot 是一个基于仓库文件的 AI Coding 任务管理协议。安装�
 首先检查：
 
 * 当前仓库根目录；
-* 是否已经存在 `.aurapilot/`；
-* 是否已经存在 `.aurapilot/installation.yaml`；
+* `aurapilot` CLI 是否可用（执行 `aurapilot --version`）；
+* 是否已经存在 `.aurapilot/` 和 `.aurapilot/installation.yaml`；
 * 仓库中已有的 Agent 指令文件；
 * 当前 Agent 实际支持的仓库级持久化指令机制。
 
@@ -45,110 +45,42 @@ AuraPilot 是一个基于仓库文件的 AI Coding 任务管理协议。安装�
 
 如果无法确定当前 Agent 支持哪种持久化指令文件，默认使用仓库根目录下的 `AGENTS.md`，并在最终报告中提示用户确认其 Agent 是否会自动读取该文件。
 
+如果 CLI 不可用，停止并提示用户按照安装文档安装。不要退回为手工拼装协议文件，因为 CLI 内置了当前版本的协议、Schema 和安全检查。
+
 ---
 
-## 3. 创建 AuraPilot 目录
+## 3. 使用 CLI 初始化并注册
 
-如果 `.aurapilot/` 不存在，创建以下结构：
+在仓库根目录执行：
 
-```text
-.aurapilot/
-├── AGENTS.md
-├── project.yaml
-├── schema.json
-├── installation.yaml
-└── tasks/
-    ├── backlog/
-    ├── in-progress/
-    ├── in-review/
-    └── done/
+```sh
+aurapilot init .
+aurapilot add .
 ```
 
-如果目录已经存在，不要删除或覆盖现有任务文件。
+`init` 必须先完成，`add` 用于把项目注册到 AuraPilot 桌面端和 CLI 共用的本地项目列表。即使项目已经初始化，也要执行 `aurapilot add .`；若已经注册，只需在最终报告中说明，无需改写协议文件。
+
+不要自行创建、覆盖或修补 `.aurapilot/` 中的协议文件。它们由 `aurapilot init` 按当前协议版本生成或安全修复。默认让 `.aurapilot/` 进入 Git 版本控制；只有用户明确要求不跟踪时，才使用 `aurapilot init . --ignore`。
 
 ---
 
-## 4. 创建项目元数据
+## 4. 核对初始化结果
 
-如果 `.aurapilot/project.yaml` 不存在，创建基础内容：
+确认 CLI 已创建或保留：
 
-```yaml
-name: <根据仓库目录或项目文件推断>
-owner: <无法可靠确定时填写 unknown>
-health: green
-schema_version: 1
-created: <当前日期，YYYY-MM-DD>
-```
+* `.aurapilot/project.yaml`；
+* `.aurapilot/AGENTS.md`；
+* `.aurapilot/schema.json`；
+* `.aurapilot/installation.yaml`；
+* `tasks/backlog`、`tasks/in-progress`、`tasks/in-review`、`tasks/done` 四个状态目录。
 
-只填写可以可靠推断的信息。不要编造所有者、团队或项目背景。
+`.aurapilot/AGENTS.md` 是完整的 Agent 工作协议，位于 `.aurapilot/` 内；仓库根目录的 `AGENTS.md` 只保存下一节所述的最小引用。不要把两者混为一份文件。
 
-如果文件已经存在，保留现有内容。
+如果 CLI 报错，保留现场并报告原始错误。不要通过手工写文件绕过 CLI 校验。
 
 ---
 
-## 5. 创建任务协议
-
-如果 `.aurapilot/AGENTS.md` 不存在，创建一份 AuraPilot Agent 工作协议。
-
-协议至少必须定义：
-
-1. 四种任务状态：
-
-   * `backlog`
-   * `in-progress`
-   * `in-review`
-   * `done`
-2. 如何选择和领取任务；
-3. 如何更新 `assigned`、`branch`、`started`；
-4. 如何向 `log` 追加进度；
-5. 如何记录 `blockers`；
-6. 如何提交审核；
-7. 如何归档完成任务；
-8. 不得删除已有日志；
-9. 不得未经协议直接修改历史完成记录；
-10. 任务文件和 `.aurapilot/AGENTS.md` 是 AuraPilot 工作模式下的唯一事实来源。
-
-如果该文件已经存在，不要覆盖。检查其中是否存在协议版本信息，并在最终报告中说明当前版本。
-
----
-
-## 6. 创建任务 Schema
-
-如果 `.aurapilot/schema.json` 不存在，创建 AuraPilot Protocol v1 的任务 JSON Schema。
-
-任务至少支持以下字段：
-
-```text
-id
-title
-priority
-type
-created
-assigned
-branch
-started
-pr
-waiting
-completed
-commit
-desc
-accept
-log
-blockers
-```
-
-Schema 应允许 `log` 项包含额外扩展字段，但必须要求每条日志至少包含：
-
-```text
-ts
-msg
-```
-
-如果 Schema 已存在，不要覆盖。
-
----
-
-## 7. 配置当前 Agent
+## 5. 配置当前 Agent
 
 选择当前 Agent 确实支持的仓库级持久化指令文件。
 
@@ -191,31 +123,25 @@ msg
 
 ---
 
-## 8. 写入安装记录
+## 6. 核对安装记录
 
-创建或更新 `.aurapilot/installation.yaml`：
+`aurapilot init` 会创建或保留 `.aurapilot/installation.yaml`。不要手工重写该文件。配置完仓库级 Agent 引用后，仅核对记录与实际情况；当前 CLI 尚未记录外部 Agent 文件时，在最终报告中列出实际配置文件即可。
+
+安装记录的基础结构为：
 
 ```yaml
 protocol_version: 1
 installed_at: <当前 ISO 8601 时间>
 updated_at: <当前 ISO 8601 时间>
-configured_files:
-  - <实际修改的指令文件>
-agent_detected: <当前 Agent 名称；无法确定时为 unknown>
+configured_files: []
+agent_detected: unknown
 mode: repository
-status: ready
+status: protocol_initialized
 ```
-
-如果安装记录已经存在：
-
-* 保留最初的 `installed_at`；
-* 更新 `updated_at`；
-* 更新实际配置文件列表；
-* 不删除未知扩展字段。
 
 ---
 
-## 9. 验证安装
+## 7. 验证安装
 
 完成后执行只读验证：
 
@@ -228,11 +154,12 @@ status: ready
 7. 安装过程没有修改标记区以外的既有指令；
 8. 没有执行任务；
 9. 没有执行 Git commit 或 push；
-10. 没有修改仓库之外的文件。
+10. `aurapilot status` 中可以看到当前项目；
+11. 没有修改仓库之外的业务文件（AuraPilot 本地注册表除外）。
 
 ---
 
-## 10. 最终报告
+## 8. 最终报告
 
 安装完成后，向用户输出：
 
@@ -242,6 +169,7 @@ status: ready
 * 协议版本
 * 当前 Agent
 * 配置的指令文件
+* CLI 注册结果
 * 新建文件
 * 修改文件
 * 保留未修改的现有文件

@@ -23,4 +23,5 @@ aurapilot-core = { path = "../crates/aurapilot-core" }
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.11.5", features = [] }
+tauri-plugin-dialog = "2.7.2"
 uuid.workspace = true

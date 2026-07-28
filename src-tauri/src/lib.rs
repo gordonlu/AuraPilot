@@ -3,10 +3,10 @@ mod platform;
 mod state;
 
 use commands::{
-    add_project, create_task, delete_agent_profile, delete_task, list_agent_profiles,
-    list_projects, list_push_attempts, preview_pointer_prompt, push_task, remove_project,
-    save_agent_profile, scan_project, scan_projects, test_agent_profile, transition_task,
-    update_task,
+    add_project, create_task, delete_agent_profile, delete_task, initialize_project,
+    list_agent_profiles, list_projects, list_push_attempts, preview_pointer_prompt, push_task,
+    remove_project, save_agent_profile, scan_project, scan_projects, test_agent_profile,
+    transition_task, update_task,
 };
 use state::AppState;
 use tauri::{Emitter, Manager};
@@ -17,6 +17,7 @@ pub const PUSH_ATTEMPT_EVENT: &str = "aurapilot://push-attempt";
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle().clone();
             let state = AppState::load(move |change| {
@@ -28,6 +29,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_projects,
             add_project,
+            initialize_project,
             remove_project,
             scan_projects,
             scan_project,

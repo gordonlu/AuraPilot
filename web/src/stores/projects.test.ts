@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
-const { invoke, listen } = vi.hoisted(() => ({
+const { invoke, listen, open } = vi.hoisted(() => ({
   invoke: vi.fn(),
   listen: vi.fn(),
+  open: vi.fn(),
 }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke, isTauri: () => true }))
 vi.mock('@tauri-apps/api/event', () => ({ listen }))
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open }))
 
 import { PROJECT_CHANGED_EVENT, useProjectsStore } from './projects'
 
@@ -15,6 +17,26 @@ describe('projects store', () => {
     setActivePinia(createPinia())
     invoke.mockReset()
     listen.mockReset()
+    open.mockReset()
+  })
+
+  it('selects a repository directory and can initialize it before registration', async () => {
+    const project = { id: 'project-1', path: '/repo without protocol', registered_at: '2026-07-28T00:00:00Z' }
+    const snapshot = { registration: project, project: null, tasks: [], diagnostics: [] }
+    open.mockResolvedValue('/repo without protocol')
+    invoke.mockImplementation((command: string) => Promise.resolve(
+      command === 'initialize_project' ? project : snapshot,
+    ))
+
+    const store = useProjectsStore()
+    expect(await store.chooseDirectory()).toBe('/repo without protocol')
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ directory: true, multiple: false }))
+
+    const registered = await store.initialize('/repo without protocol')
+    expect(registered).toEqual(project)
+    expect(invoke).toHaveBeenCalledWith('initialize_project', { path: '/repo without protocol' })
+    expect(invoke).toHaveBeenCalledWith('scan_project', { id: 'project-1' })
+    expect(store.projects).toEqual([project])
   })
 
   it('loads registry and snapshots from the backend', async () => {

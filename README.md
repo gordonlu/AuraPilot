@@ -3,7 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.rust-lang.org/"><img alt="Rust 1.85+" src="https://img.shields.io/badge/Rust-1.85%2B-000000?logo=rust&logoColor=white" /></a>
+  <a href="https://github.com/gordonlu/AuraPilot/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/gordonlu/AuraPilot/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://www.rust-lang.org/"><img alt="Rust 1.88+" src="https://img.shields.io/badge/Rust-1.88%2B-000000?logo=rust&logoColor=white" /></a>
   <a href="https://vuejs.org/"><img alt="Vue 3" src="https://img.shields.io/badge/Vue-3-42b883?logo=vuedotjs&logoColor=white" /></a>
   <a href="https://vite.dev/"><img alt="Vite 8" src="https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white" /></a>
   <a href="https://www.typescriptlang.org/"><img alt="TypeScript 6" src="https://img.shields.io/badge/TypeScript-6-3178c6?logo=typescript&logoColor=white" /></a>

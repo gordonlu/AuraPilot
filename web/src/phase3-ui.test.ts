@@ -1,10 +1,31 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import BoardView from './components/BoardView.vue'
+import AddProjectModal from './components/AddProjectModal.vue'
 import TaskFormModal from './components/TaskFormModal.vue'
 import { demoSnapshots } from './demo'
 
 describe('Phase 3 production UI', () => {
+  it('offers native directory selection and an in-place initialization recovery action', async () => {
+    const wrapper = mount(AddProjectModal, {
+      props: {
+        path: '/repo without protocol',
+        canInitialize: true,
+        error: null,
+      },
+    })
+
+    expect(wrapper.text()).toContain('选择目录')
+    expect(wrapper.text()).toContain('这个项目还没有 AuraPilot 协议')
+    await wrapper.find('.browse-button').trigger('click')
+    await wrapper.find('.initialization-callout .button').trigger('click')
+
+    expect(wrapper.emitted('browse')).toHaveLength(1)
+    expect(wrapper.emitted('initialize')?.[0]).toEqual(['/repo without protocol'])
+    expect(wrapper.attributes('aria-labelledby')).toBeUndefined()
+    expect(wrapper.find('[role="dialog"]').attributes('aria-labelledby')).toBe('add-project-title')
+  })
+
   it('renders the four protocol states, blocked cues, and escapes untrusted task text', async () => {
     const snapshots = demoSnapshots()
     snapshots[0].tasks[0].document.title = '<img src=x onerror=alert(1)>'

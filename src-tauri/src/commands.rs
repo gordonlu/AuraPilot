@@ -3,6 +3,7 @@ use crate::{PUSH_ATTEMPT_EVENT, platform};
 use aurapilot_core::agent_profile::{
     AgentLaunchProfile, LaunchMode, PromptTransport, is_builtin_profile,
 };
+use aurapilot_core::initializer::{InitOptions, initialize_repository};
 use aurapilot_core::pointer_prompt::{PointerPrompt, build_pointer_prompt};
 use aurapilot_core::project_registry::RegisteredProject;
 use aurapilot_core::project_scanner::{
@@ -31,9 +32,23 @@ pub fn list_projects(state: State<'_, AppState>) -> Result<Vec<RegisteredProject
 
 #[tauri::command]
 pub fn add_project(path: PathBuf, state: State<'_, AppState>) -> Result<RegisteredProject, String> {
+    register_project(&path, &state)
+}
+
+#[tauri::command]
+pub fn initialize_project(
+    path: PathBuf,
+    state: State<'_, AppState>,
+) -> Result<RegisteredProject, String> {
+    initialize_repository(&path, &state.config, &InitOptions::default())
+        .map_err(|error| error.to_string())?;
+    register_project(&path, &state)
+}
+
+fn register_project(path: &std::path::Path, state: &AppState) -> Result<RegisteredProject, String> {
     let project = {
         let mut registry = state.registry.lock().map_err(|error| error.to_string())?;
-        registry.add(&path).map_err(|error| error.to_string())?
+        registry.add(path).map_err(|error| error.to_string())?
     };
     let watch_result = state
         .watchers

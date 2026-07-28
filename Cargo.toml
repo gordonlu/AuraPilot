@@ -18,3 +18,17 @@ serde_yaml = { package = "serde_norway", version = "0.9.42" }
 tempfile = "3.27.0"
 thiserror = "2.0.19"
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
+
+# Keep local and CI build artifacts bounded. AuraPilot favors predictable disk
+# usage over incremental Rust rebuild speed.
+[profile.dev]
+incremental = false
+
+[profile.test]
+incremental = false
+
+[profile.release]
+incremental = false
+
+[profile.bench]
+incremental = false

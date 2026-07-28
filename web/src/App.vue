@@ -26,6 +26,9 @@ const showDiagnostics = ref(false)
 const busy = ref(false)
 const actionError = ref<string | null>(null)
 const lastRefresh = ref(new Date())
+const projectPath = ref('')
+const projectSelecting = ref(false)
+const projectCanInitialize = ref(false)
 
 const allSnapshots = computed(() => Object.values(projectsStore.snapshots))
 const visibleSnapshots = computed(() => activeProject.value === 'all'
@@ -50,6 +53,32 @@ const toggleTheme = () => {
   theme.value = theme.value === 'dark' ? 'light' : 'dark'
   localStorage.setItem('aurapilot-theme', theme.value)
 }
+const openAddProject = () => {
+  projectPath.value = ''
+  projectCanInitialize.value = false
+  actionError.value = null
+  modal.value = 'add-project'
+}
+const updateProjectPath = (path: string) => {
+  projectPath.value = path
+  projectCanInitialize.value = false
+  actionError.value = null
+}
+const projectErrorMessage = (error: unknown, action = '添加') => {
+  const message = String(error)
+  if (message.includes('already registered')) return '这个项目已经在 AuraPilot 中。'
+  if (message.includes('No such file') || message.includes('not a directory')) return '所选目录不存在或无法访问，请重新选择。'
+  return `无法${action}项目：${message}`
+}
+const chooseProjectDirectory = async () => {
+  projectSelecting.value = true
+  actionError.value = null
+  try {
+    const selectedPath = await projectsStore.chooseDirectory()
+    if (selectedPath) updateProjectPath(selectedPath)
+  } catch (error) { actionError.value = projectErrorMessage(error) }
+  finally { projectSelecting.value = false }
+}
 const saveTask = async (projectId: string, draft: TaskDraft) => {
   busy.value = true; actionError.value = null
   try {
@@ -61,7 +90,21 @@ const saveTask = async (projectId: string, draft: TaskDraft) => {
 const addProject = async (path: string) => {
   busy.value = true; actionError.value = null
   try { const project = await projectsStore.add(path); activeProject.value = project.id; modal.value = null }
-  catch (error) { actionError.value = String(error) } finally { busy.value = false }
+  catch (error) {
+    if (String(error).includes('project does not contain a .aurapilot directory')) {
+      projectCanInitialize.value = true
+    } else actionError.value = projectErrorMessage(error)
+  } finally { busy.value = false }
+}
+const initializeProject = async (path: string) => {
+  busy.value = true; actionError.value = null
+  try {
+    const project = await projectsStore.initialize(path)
+    activeProject.value = project.id
+    modal.value = null
+    lastRefresh.value = new Date()
+  } catch (error) { actionError.value = projectErrorMessage(error, '初始化') }
+  finally { busy.value = false }
 }
 const transitionTask = async (input: TaskTransition) => {
   if (!selected.value) return
@@ -91,6 +134,11 @@ onMounted(async () => {
   if (import.meta.env.DEV) {
     const preview = new URLSearchParams(window.location.search)
     if (preview.get('view') === 'blocked') activeView.value = 'blocked'
+    if (preview.get('modal') === 'add-project') {
+      openAddProject()
+      projectPath.value = preview.get('path') ?? ''
+      projectCanInitialize.value = preview.get('needsInit') === '1'
+    }
     const taskId = preview.get('task')
     if (taskId) {
       const project = allSnapshots.value.find((item) => item.tasks.some((task) => task.document.id === taskId))
@@ -108,7 +156,7 @@ onBeforeUnmount(() => { projectsStore.stopWatching(); window.removeEventListener
     <AppSidebar
       :snapshots="allSnapshots" :active-project="activeProject" :active-view="activeView"
       :theme="theme" :diagnostic-count="diagnosticCount"
-      @project="activeProject = $event" @view="activeView = $event" @add="modal = 'add-project'"
+      @project="activeProject = $event" @view="activeView = $event" @add="openAddProject"
       @theme="toggleTheme" @diagnostics="showDiagnostics = !showDiagnostics" @profiles="modal = 'profiles'"
     />
     <main class="workspace">
@@ -121,7 +169,7 @@ onBeforeUnmount(() => { projectsStore.stopWatching(); window.removeEventListener
 
       <div class="main-surface">
         <div v-if="projectsStore.loading" class="loading-state"><span/><p>正在扫描项目协议…</p></div>
-        <EmptyState v-else-if="!allSnapshots.length" @add="modal = 'add-project'" />
+        <EmptyState v-else-if="!allSnapshots.length" @add="openAddProject" />
         <BoardView v-else-if="activeView === 'board'" :snapshots="visibleSnapshots" :search="search" :selected-key="selectedKey" @open="selectTask" />
         <BlockedView v-else :snapshots="visibleSnapshots" :search="search" @open="selectTask" @back="activeView = 'board'" />
       </div>
@@ -141,7 +189,12 @@ onBeforeUnmount(() => { projectsStore.stopWatching(); window.removeEventListener
       :task="modal === 'edit' ? selectedTask : null" :busy="busy" :error="actionError"
       @close="modal = null; actionError = null" @save="saveTask"
     />
-    <AddProjectModal v-if="modal === 'add-project'" :busy="busy" :error="actionError" @close="modal = null; actionError = null" @add="addProject" />
+    <AddProjectModal
+      v-if="modal === 'add-project'" :path="projectPath" :busy="busy" :selecting="projectSelecting"
+      :error="actionError" :can-initialize="projectCanInitialize"
+      @update:path="updateProjectPath" @browse="chooseProjectDirectory" @add="addProject"
+      @initialize="initializeProject" @close="modal = null; actionError = null"
+    />
     <PushTaskModal v-if="modal === 'push' && selectedTask && selectedProject" :task="selectedTask" :project="selectedProject" @close="modal = null" />
     <AgentProfilesModal v-if="modal === 'profiles'" :projects="allSnapshots" @close="modal = null" />
     <ConfirmDialog
