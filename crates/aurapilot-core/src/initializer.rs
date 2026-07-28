@@ -221,7 +221,7 @@ fn ensure_gitignore_entry(repository: &Path) -> Result<bool, InitError> {
 }
 
 fn atomic_write(path: &Path, content: &[u8]) -> io::Result<()> {
-    let parent = path
+    let _parent = path
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "destination has no parent"))?;
     let nonce = SystemTime::now()
@@ -239,7 +239,7 @@ fn atomic_write(path: &Path, content: &[u8]) -> io::Result<()> {
         file.sync_all()?;
         fs::rename(&temporary, path)?;
         #[cfg(unix)]
-        fs::File::open(parent)?.sync_all()?;
+        fs::File::open(_parent)?.sync_all()?;
         Ok(())
     })();
     if result.is_err() {

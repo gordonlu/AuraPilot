@@ -27,7 +27,10 @@ mod tests {
     fn local_paths_do_not_depend_on_the_tauri_identifier() {
         for path in [registry_path(), profile_path(), push_attempt_path()] {
             let path = path.unwrap();
-            assert!(path.to_string_lossy().contains(".aurapilot/"));
+            assert!(
+                path.components()
+                    .any(|component| component.as_os_str() == ".aurapilot")
+            );
             assert!(!path.to_string_lossy().contains("dev.aurapilot.desktop"));
         }
     }
