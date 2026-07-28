@@ -11,6 +11,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open }))
 
 import { PROJECT_CHANGED_EVENT, useProjectsStore } from './projects'
+import type { ProjectSnapshot } from '../types/protocol'
 
 describe('projects store', () => {
   beforeEach(() => {
@@ -43,12 +44,57 @@ describe('projects store', () => {
     const project = { id: 'project-1', path: '/repo', registered_at: '2026-07-28T00:00:00Z' }
     const snapshot = { registration: project, project: null, tasks: [], diagnostics: [] }
     invoke.mockImplementation((command: string) =>
-      Promise.resolve(command === 'list_projects' ? [project] : [snapshot]),
+      Promise.resolve(command === 'list_projects' ? [project] : snapshot),
     )
     const store = useProjectsStore()
     await store.load()
     expect(store.projects).toEqual([project])
-    expect(store.snapshots['project-1']).toEqual(snapshot)
+    expect(store.loading).toBe(false)
+    await vi.waitFor(() => expect(store.snapshots['project-1']).toEqual(snapshot))
+    expect(invoke).not.toHaveBeenCalledWith('scan_projects')
+  })
+
+  it('shows registered projects before a slow project scan finishes', async () => {
+    const project = { id: 'project-1', path: '/slow-repo', registered_at: '2026-07-28T00:00:00Z' }
+    let finishScan: ((snapshot: ProjectSnapshot) => void) | undefined
+    const pendingScan = new Promise<ProjectSnapshot>((resolve) => { finishScan = resolve })
+    invoke.mockImplementation((command: string) => command === 'list_projects'
+      ? Promise.resolve([project])
+      : pendingScan)
+    const store = useProjectsStore()
+
+    await store.load()
+
+    expect(store.loading).toBe(false)
+    expect(store.projects).toEqual([project])
+    expect(store.snapshots['project-1']).toMatchObject({ registration: project, tasks: [] })
+    finishScan?.({ registration: project, project: null, tasks: [], diagnostics: [] } as ProjectSnapshot)
+    await pendingScan
+  })
+
+  it('normalizes protocol arrays omitted from compact backend JSON', async () => {
+    const project = { id: 'project-1', path: '/repo', registered_at: '2026-07-28T00:00:00Z' }
+    const compactSnapshot = {
+      registration: project,
+      project: null,
+      tasks: [{
+        path: '/repo/.aurapilot/tasks/backlog/TASK-001.yaml',
+        state: 'backlog',
+        document: { id: 'TASK-001', title: 'Compact task' },
+      }],
+      diagnostics: [],
+    }
+    invoke.mockImplementation((command: string) => Promise.resolve(
+      command === 'list_projects' ? [project] : compactSnapshot,
+    ))
+    const store = useProjectsStore()
+
+    await store.load()
+    await vi.waitFor(() => expect(store.snapshots['project-1'].tasks).toHaveLength(1))
+
+    expect(store.snapshots['project-1'].tasks[0].document).toMatchObject({
+      accept: [], log: [], blockers: [],
+    })
   })
 
   it('refreshes only the project referenced by a watcher event', async () => {
@@ -108,11 +154,15 @@ describe('projects store', () => {
     const store = useProjectsStore()
     store.snapshots['project-1'] = snapshot as never
 
-    await expect(store.create('project-1', {
+    const created = await store.create('project-1', {
       title: 'Task', priority: 'P1', task_type: 'feature', desc: null, accept: [],
-    })).resolves.toEqual(task)
+    })
 
-    expect(store.snapshots['project-1'].tasks).toEqual([task])
+    expect(created).toMatchObject({
+      ...task,
+      document: { ...task.document, accept: [], log: [], blockers: [] },
+    })
+    expect(store.snapshots['project-1'].tasks).toEqual([created])
     expect(invoke).not.toHaveBeenCalledWith('scan_project', expect.anything())
   })
 

@@ -22,6 +22,21 @@ const replaceTask = (snapshot: ProjectSnapshot | undefined, task: LocatedTask) =
   else snapshot.tasks[index] = task
 }
 
+const normalizeTask = (task: LocatedTask): LocatedTask => ({
+  ...task,
+  document: {
+    ...task.document,
+    accept: task.document.accept ?? [],
+    log: task.document.log ?? [],
+    blockers: task.document.blockers ?? [],
+  },
+})
+
+const normalizeSnapshot = (snapshot: ProjectSnapshot): ProjectSnapshot => ({
+  ...snapshot,
+  tasks: snapshot.tasks.map(normalizeTask),
+})
+
 export const useProjectsStore = defineStore('projects', {
   state: () => ({
     projects: [] as RegisteredProject[],
@@ -45,14 +60,18 @@ export const useProjectsStore = defineStore('projects', {
       this.loading = true
       this.error = null
       try {
-        const [projects, snapshots] = await Promise.all([
-          invokeBackend<RegisteredProject[]>('list_projects'),
-          invokeBackend<ProjectSnapshot[]>('scan_projects'),
-        ])
+        const projects = await invokeBackend<RegisteredProject[]>('list_projects')
         this.projects = projects
-        this.snapshots = Object.fromEntries(
-          snapshots.map((snapshot) => [snapshot.registration.id, snapshot]),
-        )
+        this.snapshots = Object.fromEntries(projects.map((project) => [
+          project.id,
+          this.snapshots[project.id] ?? {
+            registration: project,
+            project: null,
+            tasks: [],
+            diagnostics: [],
+          },
+        ]))
+        for (const project of projects) this.refreshInBackground(project.id)
       } catch (error) {
         this.error = String(error)
       } finally {
@@ -110,7 +129,7 @@ export const useProjectsStore = defineStore('projects', {
         snapshot.tasks.push(task)
         return task
       }
-      const task = await invokeBackend<LocatedTask>('create_task', { projectId, input })
+      const task = normalizeTask(await invokeBackend<LocatedTask>('create_task', { projectId, input }))
       replaceTask(this.snapshots[projectId], task)
       return task
     },
@@ -124,7 +143,7 @@ export const useProjectsStore = defineStore('projects', {
         })
         return task
       }
-      const task = await invokeBackend<LocatedTask>('update_task', { projectId, taskId, input })
+      const task = normalizeTask(await invokeBackend<LocatedTask>('update_task', { projectId, taskId, input }))
       replaceTask(this.snapshots[projectId], task)
       return task
     },
@@ -138,7 +157,7 @@ export const useProjectsStore = defineStore('projects', {
         task.document.commit = input.target === 'done' ? (input.commit ?? task.document.commit) : null
         return task
       }
-      const task = await invokeBackend<LocatedTask>('transition_task', { projectId, taskId, input })
+      const task = normalizeTask(await invokeBackend<LocatedTask>('transition_task', { projectId, taskId, input }))
       replaceTask(this.snapshots[projectId], task)
       return task
     },
@@ -160,8 +179,7 @@ export const useProjectsStore = defineStore('projects', {
     },
     async refresh(id: string) {
       const snapshot = await invokeBackend<ProjectSnapshot>('scan_project', { id })
-      this.snapshots[id] = snapshot
-      this.error = null
+      this.snapshots[id] = normalizeSnapshot(snapshot)
     },
     refreshInBackground(id: string) {
       void this.refresh(id).catch((error) => {

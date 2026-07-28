@@ -56,6 +56,14 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn task_serialization_keeps_protocol_arrays_present_when_empty() {
+        let source = serde_yaml::to_string(&TaskDocument::default()).unwrap();
+        assert!(source.contains("accept: []"));
+        assert!(source.contains("log: []"));
+        assert!(source.contains("blockers: []"));
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -96,11 +104,11 @@ pub struct TaskDocument {
     pub commit: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub desc: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub accept: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub log: Vec<TaskLogEntry>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub blockers: Vec<String>,
     #[serde(flatten)]
     pub extensions: BTreeMap<String, Value>,
