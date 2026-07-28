@@ -1,0 +1,15 @@
+{
+  "name": "aurapilot-workspace",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "dev": "pnpm --dir web dev",
+    "build": "pnpm --dir web build",
+    "test": "pnpm --dir web test",
+    "check": "pnpm --dir web check",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}

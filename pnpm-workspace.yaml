@@ -1,0 +1,4 @@
+packages:
+  - web
+minimumReleaseAgeExclude:
+  - '@types/node@26.1.2'

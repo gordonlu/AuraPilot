@@ -1,0 +1,20 @@
+[workspace]
+members = ["crates/aurapilot-core", "src-tauri"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.dependencies]
+chrono = { version = "0.4.45", features = ["serde"] }
+dirs = "6.0.0"
+notify = "8.2.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+serde_yaml = { package = "serde_norway", version = "0.9.42" }
+tempfile = "3.27.0"
+thiserror = "2.0.19"
+uuid = { version = "1.24.0", features = ["v4", "serde"] }
