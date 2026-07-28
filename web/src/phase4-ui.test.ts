@@ -18,7 +18,9 @@ describe('Phase 4 Push Dispatcher UI', () => {
     expect(wrapper.findAll('.agent-option').length).toBeGreaterThanOrEqual(3)
     expect(wrapper.text()).toContain('OpenCode')
     expect(wrapper.text()).toContain('.aurapilot/AGENTS.md')
+    expect(wrapper.text()).toContain('当前 Push 不会追加到已有 Session')
     await wrapper.findAll('.agent-option')[4].trigger('click')
+    expect(wrapper.find('button.button.primary').text()).toContain('新建 Session 并 Push 给 OpenCode')
     await wrapper.find('button.button.primary').trigger('click')
     await flushPromises()
 

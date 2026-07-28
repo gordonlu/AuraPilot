@@ -13,6 +13,12 @@ const outcome = ref<PushOutcome | null>(null)
 const busy = ref(false)
 const error = ref<string | null>(null)
 const selectedEntry = computed(() => agents.profiles.find((entry) => entry.profile.id === selected.value))
+const copiesOnly = computed(() => selectedEntry.value?.profile.launch_mode === 'clipboard_only')
+const primaryLabel = computed(() => {
+  if (busy.value) return copiesOnly.value ? '正在复制…' : '正在新建 Session…'
+  if (copiesOnly.value) return '复制任务指令'
+  return `新建 Session 并 Push 给 ${selectedEntry.value?.profile.display_name ?? 'Agent'}`
+})
 
 onMounted(async () => {
   try {
@@ -46,11 +52,11 @@ const push = async () => {
   <div class="modal-backdrop" @mousedown.self="$emit('close')">
     <section class="task-modal push-modal" role="dialog" aria-modal="true" aria-label="Push 任务">
       <header>
-        <div><span class="modal-mark"><UiIcon name="send"/></span><div><h2>Push {{ task.document.id }}</h2><p>仅传递任务入口，不修改任务状态</p></div></div>
+        <div><span class="modal-mark"><UiIcon name="send"/></span><div><h2>Push {{ task.document.id }}</h2><p>新开 Agent Session，不修改任务状态</p></div></div>
         <button class="icon-button" aria-label="关闭" @click="$emit('close')"><UiIcon name="x"/></button>
       </header>
       <div class="modal-body">
-        <p class="push-notice">AuraPilot 不管理多个 Agent，只允许保存多个启动方式。你可以顺序多次 Push；每次只手动选择一个 Profile。</p>
+        <p class="push-notice"><strong>当前 Push 不会追加到已有 Session。</strong>选择 Agent Profile 会新开一个 Session；“复制任务指令”只复制 Pointer Prompt。</p>
         <div v-if="agents.loading" class="inline-loading">正在检测 Agent…</div>
         <div v-else class="agent-grid">
           <button
@@ -61,7 +67,7 @@ const push = async () => {
             <span :class="['availability-dot', { available: entry.availability.available }]"/>
             <strong>{{ entry.profile.display_name }}</strong>
             <small>{{ entry.availability.available ? entry.availability.detail : '未检测到，可使用剪贴板兜底' }}</small>
-            <b v-if="entry.profile.id === 'opencode'">OpenCode</b>
+            <b>{{ entry.profile.launch_mode === 'clipboard_only' ? '仅复制' : '新建 Session' }}</b>
           </button>
         </div>
         <section v-if="preview" class="prompt-preview">
@@ -75,7 +81,7 @@ const push = async () => {
         <span class="push-safety">任务仍保持 {{ task.state }}</span>
         <button class="button secondary" @click="$emit('close')">关闭</button>
         <button class="button primary" :disabled="busy || !selectedEntry" @click="push">
-          <UiIcon name="send" :size="15"/>{{ busy ? '正在启动…' : `Push 给 ${selectedEntry?.profile.display_name ?? 'Agent'}` }}
+          <UiIcon name="send" :size="15"/>{{ primaryLabel }}
         </button>
       </footer>
     </section>
