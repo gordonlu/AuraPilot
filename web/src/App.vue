@@ -13,13 +13,14 @@ import TaskFormModal from './components/TaskFormModal.vue'
 import PushTaskModal from './components/PushTaskModal.vue'
 import UiIcon from './components/UiIcon.vue'
 import { useProjectsStore } from './stores/projects'
+import { nextTheme, resolveTheme, type Theme } from './theme'
 import type { LocatedTask, TaskDraft, TaskTransition } from './types/protocol'
 
 const projectsStore = useProjectsStore()
 const activeProject = ref('all')
 const activeView = ref<'board' | 'blocked'>('board')
 const search = ref('')
-const theme = ref<'dark' | 'light'>((localStorage.getItem('aurapilot-theme') as 'dark' | 'light') || 'dark')
+const theme = ref<Theme>(resolveTheme(localStorage.getItem('aurapilot-theme')))
 const selected = ref<{ projectId: string; taskId: string } | null>(null)
 const modal = ref<'create' | 'edit' | 'add-project' | 'delete' | 'push' | 'profiles' | null>(null)
 const showDiagnostics = ref(false)
@@ -50,8 +51,9 @@ const selectTask = (projectId: string, task: LocatedTask) => {
 }
 const closeOverlays = () => { modal.value = null; selected.value = null; showDiagnostics.value = false; actionError.value = null }
 const toggleTheme = () => {
-  theme.value = theme.value === 'dark' ? 'light' : 'dark'
+  theme.value = nextTheme(theme.value)
   localStorage.setItem('aurapilot-theme', theme.value)
+  document.documentElement.dataset.theme = theme.value
 }
 const openAddProject = () => {
   projectPath.value = ''

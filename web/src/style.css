@@ -43,6 +43,30 @@
   color-scheme: light;
 }
 
+[data-theme="brand"] {
+  --brand-coral: #f86858;
+  --brand-yellow: #ffd010;
+  --brand-teal: #00a8a8;
+  --brand-navy: #103040;
+  --bg-base: #fffdf7;
+  --bg-elev: #fff;
+  --bg-sunken: #f2f9f8;
+  --bg-hover: #e7f5f3;
+  --border: #d8e7e4;
+  --border-strong: #b9d4d0;
+  --text-1: #103040;
+  --text-2: #526a72;
+  --text-3: #84979c;
+  --accent: #007f82;
+  --accent-soft: rgba(0, 168, 168, .12);
+  --primary: #103040;
+  --green: #00877f;
+  --yellow: #987000;
+  --red: #c7463b;
+  --shadow: 0 18px 48px rgba(16, 48, 64, .16);
+  color-scheme: light;
+}
+
 * { box-sizing: border-box; }
 html, body, #app { width: 100%; min-width: 320px; height: 100%; margin: 0; overflow: hidden; }
 body { font-size: 13px; background: var(--bg-base); color: var(--text-1); }
@@ -59,6 +83,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .app-shell.blocked-atmosphere[data-theme="light"] { --bg-base: #fbf1f1; --bg-sunken: #f7e9e9; --border: #f0d8d8; }
 
 .sidebar { width: 224px; flex: 0 0 224px; display: flex; flex-direction: column; padding: 14px 12px; background: var(--bg-elev); border-right: 1px solid var(--border); overflow: hidden; }
+[data-theme="brand"] .sidebar { --bg-elev: #103040; --bg-sunken: #183e50; --bg-hover: #1d4859; --border: #315565; --border-strong: #4e7180; --text-1: #fffdf7; --text-2: #d2e3e3; --text-3: #91adb3; --accent: #ffd010; --accent-soft: rgba(255, 208, 16, .13); --red: #ff8174; }
+[data-theme="brand"] .sidebar { border-top: 3px solid var(--brand-yellow); }
+[data-theme="brand"] .brand-lockup { height: 66px; margin: -7px -5px 12px; padding: 4px 5px 8px; border-radius: 0 0 8px 8px; background: #fffdf7; }
+[data-theme="brand"] .task-card.blocked::before { background: var(--brand-coral); }
+[data-theme="brand"] .status-bar .live i { background: var(--brand-teal); }
 .brand-lockup { height: 72px; display: flex; align-items: center; padding: 0 0 16px; overflow: hidden; }
 .brand-logo { width: 198px; max-width: none; height: auto; display: block; filter: drop-shadow(0 0 9px rgba(0, 196, 204, .18)); }
 .brand-logo-mark { display: none; }

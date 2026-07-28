@@ -2,10 +2,30 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import BoardView from './components/BoardView.vue'
 import AddProjectModal from './components/AddProjectModal.vue'
+import AppSidebar from './components/AppSidebar.vue'
 import TaskFormModal from './components/TaskFormModal.vue'
 import { demoSnapshots } from './demo'
 
 describe('Phase 3 production UI', () => {
+  it('only marks a positive blocked-task count as dangerous', async () => {
+    const snapshots = demoSnapshots()
+    for (const snapshot of snapshots) {
+      for (const task of snapshot.tasks) task.document.blockers = []
+    }
+    const wrapper = mount(AppSidebar, {
+      props: { snapshots, activeProject: 'all', activeView: 'board', theme: 'light', diagnosticCount: 0 },
+    })
+
+    const count = wrapper.find('.primary-nav button:last-child b')
+    expect(count.text()).toBe('0')
+    expect(count.classes()).not.toContain('danger-count')
+
+    snapshots[0].tasks[0].document.blockers = ['waiting']
+    await wrapper.setProps({ snapshots: [...snapshots] })
+    expect(count.text()).toBe('1')
+    expect(count.classes()).toContain('danger-count')
+  })
+
   it('offers native directory selection and an in-place initialization recovery action', async () => {
     const wrapper = mount(AddProjectModal, {
       props: {

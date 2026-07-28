@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "node scripts/start-tauri-web.mjs",
     "beforeBuildCommand": "pnpm --dir web build",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:28727",
     "frontendDist": "../web/dist"
   },
   "app": {

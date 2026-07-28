@@ -1,16 +1,27 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import type { Theme } from '../theme'
 import type { ProjectSnapshot } from '../types/protocol'
 import brandLogo from '../assets/aurapilot-logo.webp'
 import brandMark from '../assets/aurapilot-mark.webp'
 import UiIcon from './UiIcon.vue'
 
-defineProps<{
+const props = defineProps<{
   snapshots: ProjectSnapshot[]
   activeProject: string
   activeView: 'board' | 'blocked'
-  theme: 'dark' | 'light'
+  theme: Theme
   diagnosticCount: number
 }>()
+
+const blockedCount = computed(() => props.snapshots
+  .flatMap((item) => item.tasks)
+  .filter((task) => task.document.blockers.length).length)
+const themePresentation = computed(() => ({
+  light: { icon: 'sun', label: '浅色模式' },
+  brand: { icon: 'palette', label: '品牌配色' },
+  dark: { icon: 'moon', label: '暗色模式' },
+})[props.theme])
 
 defineEmits<{
   project: [id: string]
@@ -57,7 +68,7 @@ defineEmits<{
       </button>
       <button :class="['nav-row', { active: activeView === 'blocked' }]" @click="$emit('view', 'blocked')">
         <UiIcon name="alert"/><span>阻塞聚焦</span>
-        <b class="danger-count">{{ snapshots.flatMap((item) => item.tasks).filter((task) => task.document.blockers.length).length }}</b>
+        <b :class="{ 'danger-count': blockedCount > 0 }">{{ blockedCount }}</b>
       </button>
     </nav>
 
@@ -66,7 +77,7 @@ defineEmits<{
         <UiIcon name="terminal"/><span>Agent Profiles</span>
       </button>
       <button class="footer-control" @click="$emit('theme')">
-        <UiIcon :name="theme === 'dark' ? 'moon' : 'sun'"/><span>{{ theme === 'dark' ? '暗色模式' : '浅色模式' }}</span>
+        <UiIcon :name="themePresentation.icon"/><span>{{ themePresentation.label }}</span>
       </button>
       <button class="footer-control" @click="$emit('diagnostics')">
         <UiIcon name="diagnostic"/><span>诊断面板</span><i :class="{ warning: diagnosticCount }" />

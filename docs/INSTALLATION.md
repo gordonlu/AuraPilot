@@ -67,7 +67,7 @@ Development:
 pnpm tauri dev
 ```
 
-If an AuraPilot Vite server is already running on port 1420, the desktop launcher reuses it. If another application owns the port, startup stops with a short diagnostic instead of a Vite stack trace.
+If an AuraPilot Vite server is already running on port 28727 (`AURAP` on a phone keypad), the desktop launcher reuses it. If another application owns the port, startup stops with a short diagnostic instead of a Vite stack trace.
 
 Build the desktop binary and native installer for the current platform:
 

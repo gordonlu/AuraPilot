@@ -39,6 +39,10 @@ defineProps<{ name: string; size?: number }>()
     <template v-else-if="name === 'moon'">
       <path d="M20.5 15.5A8.7 8.7 0 0 1 8.5 3.5a8.7 8.7 0 1 0 12 12Z"/>
     </template>
+    <template v-else-if="name === 'palette'">
+      <path d="M12 3a9 9 0 0 0 0 18h1.5a1.8 1.8 0 0 0 1.2-3.2 1.8 1.8 0 0 1 1.2-3.2H18A3 3 0 0 0 21 12a9 9 0 0 0-9-9Z"/>
+      <circle cx="7.5" cy="10" r=".8" fill="currentColor" stroke="none"/><circle cx="10" cy="6.8" r=".8" fill="currentColor" stroke="none"/><circle cx="14" cy="6.8" r=".8" fill="currentColor" stroke="none"/>
+    </template>
     <template v-else-if="name === 'diagnostic'">
       <path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="6"/><path d="m9.5 12 1.6 1.6 3.5-3.7"/>
     </template>
