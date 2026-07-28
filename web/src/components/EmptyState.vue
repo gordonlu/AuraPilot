@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import brandMark from '../assets/aurapilot-mark.webp'
 import UiIcon from './UiIcon.vue'
 defineEmits<{ add: [] }>()
 </script>
 
 <template>
   <section class="empty-state">
-    <UiIcon name="compass" :size="62" />
+    <img :src="brandMark" alt="AuraPilot" class="empty-brand-mark" />
     <h1>AuraPilot</h1>
     <p>把本地项目接入统一任务控制台</p>
     <button class="button primary" @click="$emit('add')"><UiIcon name="plus"/>添加已有项目</button>

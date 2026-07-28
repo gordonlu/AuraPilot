@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { ProjectSnapshot } from '../types/protocol'
+import brandLogo from '../assets/aurapilot-logo.webp'
+import brandMark from '../assets/aurapilot-mark.webp'
 import UiIcon from './UiIcon.vue'
 
 defineProps<{
@@ -23,8 +25,8 @@ defineEmits<{
 <template>
   <aside class="sidebar">
     <div class="brand-lockup">
-      <UiIcon name="compass" :size="30" />
-      <div><strong>AuraPilot</strong><span>AI Coding 项目的领航员</span></div>
+      <img :src="brandLogo" alt="AuraPilot" class="brand-logo brand-logo-full" />
+      <img :src="brandMark" alt="AuraPilot" class="brand-logo brand-logo-mark" />
     </div>
 
     <div class="sidebar-section-head">
