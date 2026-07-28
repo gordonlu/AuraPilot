@@ -9,7 +9,7 @@ Neither component installs an Agent plugin, modifies global Agent configuration,
 
 ## Prerequisites for source builds
 
-- Rust 1.85 or newer;
+- Rust 1.88 or newer;
 - Node.js 22;
 - pnpm 11.9.0;
 - the platform dependencies required by Tauri 2.
