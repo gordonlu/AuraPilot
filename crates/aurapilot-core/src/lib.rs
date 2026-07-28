@@ -1,6 +1,8 @@
 pub mod agent_profile;
+pub mod app_paths;
 pub mod config;
 pub mod diagnostic;
+pub mod initializer;
 pub mod lock;
 pub mod model;
 pub mod parser;

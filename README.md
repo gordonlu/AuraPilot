@@ -19,9 +19,21 @@
 
 AuraPilot is a local-first, cross-repository task control plane for AI coding agents.
 
+## Quick start
+
+```sh
+cargo install --path crates/aurapilot-cli --locked
+aurapilot init /path/to/repository
+aurapilot add /path/to/repository
+aurapilot status
+```
+
+Continue with the [installation guide](docs/INSTALLATION.md) and the one-time [Agent Bootstrap guide](docs/BOOTSTRAP.md).
+
 ## Workspace
 
 - `crates/aurapilot-core`: protocol models, validation, path safety, locking, task IDs, and file transactions.
+- `crates/aurapilot-cli`: `init`, `add`, and `status` commands shared with the desktop registry.
 - `src-tauri`: Tauri 2 desktop shell. Its development identifier is not part of the AuraPilot protocol.
 - `web`: Vue 3 + Vite + TypeScript + Pinia frontend, tested with Vitest.
 - `prototype`: preserved legacy HTML/CSS/JavaScript interaction prototype. It is reference-only; production frontend code lives in `web/src`.

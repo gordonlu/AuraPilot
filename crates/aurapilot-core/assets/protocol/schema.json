@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurapilot.dev/schema/task-v1.json",
+  "title": "AuraPilot Task Protocol v1",
+  "type": "object",
+  "required": ["id", "title", "priority", "type", "created"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^TASK-[0-9]{3,}$" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "priority": { "enum": ["P0", "P1", "P2", "P3"] },
+    "type": { "enum": ["feature", "bug", "refactor", "docs", "test", "chore"] },
+    "created": { "type": "string", "format": "date" },
+    "assigned": { "type": "string", "minLength": 1 },
+    "branch": { "type": "string", "minLength": 1 },
+    "started": { "type": "string", "format": "date-time" },
+    "pr": { "type": "integer", "minimum": 1 },
+    "waiting": { "type": "string" },
+    "completed": { "type": "string", "format": "date-time" },
+    "commit": { "type": "string", "minLength": 7, "maxLength": 40, "pattern": "^[0-9a-f]+$" },
+    "desc": { "type": "string" },
+    "accept": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "log": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["ts", "msg"],
+        "properties": {
+          "ts": { "type": "string", "format": "date-time" },
+          "msg": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "blockers": { "type": "array", "items": { "type": "string" }, "default": [] }
+  },
+  "additionalProperties": true
+}

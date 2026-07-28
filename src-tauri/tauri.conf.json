@@ -24,7 +24,11 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Local task control plane for coding agents",
+    "longDescription": "AuraPilot manages repository task protocols and hands selected tasks to user-configured coding agent launch profiles.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -81,7 +81,6 @@ name = "aurapilot"
 version = "0.1.0"
 dependencies = [
  "aurapilot-core",
- "dirs",
  "serde",
  "serde_json",
  "tauri",
@@ -90,10 +89,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aurapilot-cli"
+version = "0.1.0"
+dependencies = [
+ "aurapilot-core",
+ "serde_norway",
+ "tempfile",
+]
+
+[[package]]
 name = "aurapilot-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "dirs",
  "notify",
  "serde",
  "serde_json",
