@@ -12,6 +12,8 @@ pub mod profile_registry;
 pub mod project_registry;
 pub mod project_scanner;
 pub mod push_attempt;
+pub mod runtime_store;
+pub mod session_route;
 pub mod task_id;
 pub mod task_store;
 pub mod transaction;

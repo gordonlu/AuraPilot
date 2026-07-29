@@ -1,3 +1,4 @@
+use crate::providers::codex::{CodexAppSession, StartedTurn};
 use crate::state::AppState;
 use crate::{PUSH_ATTEMPT_EVENT, platform};
 use aurapilot_core::agent_profile::{
@@ -10,6 +11,11 @@ use aurapilot_core::project_scanner::{
     ProjectSnapshot, scan_project as scan_one, scan_projects as scan_all,
 };
 use aurapilot_core::push_attempt::{PushAttempt, PushAttemptStatus, PushDelivery};
+use aurapilot_core::runtime_store::{
+    AgentProvider, NewPush, NewSessionBinding, PushDeliveryPolicy, PushMode, PushStatus,
+    SessionBinding, SessionBindingSource, SessionRuntimeState, SessionVerification,
+};
+use aurapilot_core::session_route::{PushRoute, SessionCapabilities, route_push};
 use aurapilot_core::validation::SeverityProfile;
 use aurapilot_core::watcher::WatchError;
 use aurapilot_core::{
@@ -24,6 +30,14 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use uuid::Uuid;
+
+const CODEX_CAPABILITIES: SessionCapabilities = SessionCapabilities {
+    resumable: true,
+    live_input: true,
+    same_turn_steer: true,
+    interruptible: true,
+    forkable: true,
+};
 
 #[tauri::command]
 pub async fn list_projects(state: State<'_, AppState>) -> Result<Vec<RegisteredProject>, String> {
@@ -207,6 +221,7 @@ pub struct PushOutcome {
     pub attempt: PushAttempt,
     pub pointer_prompt: PointerPrompt,
     pub message: String,
+    pub session: Option<SessionBinding>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -302,6 +317,288 @@ pub async fn list_push_attempts(state: State<'_, AppState>) -> Result<Vec<PushAt
 }
 
 #[tauri::command]
+pub async fn list_agent_sessions(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SessionBinding>, String> {
+    let project_id = Uuid::parse_str(&project_id).map_err(|error| error.to_string())?;
+    let runtime = state.runtime.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        runtime
+            .lock()
+            .map_err(|error| error.to_string())?
+            .list_sessions(project_id)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn bind_agent_session(
+    project_id: String,
+    profile_id: String,
+    external_session_id: String,
+    display_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<SessionBinding, String> {
+    let project = registered_project(&project_id, &state)?;
+    if external_session_id.trim().is_empty() {
+        return Err("session ID cannot be empty".into());
+    }
+    let profile = state
+        .profiles
+        .lock()
+        .map_err(|error| error.to_string())?
+        .find(&profile_id)
+        .ok_or_else(|| format!("agent profile not found: {profile_id}"))?;
+    if profile.launch_mode == LaunchMode::ClipboardOnly {
+        return Err("clipboard-only profiles cannot own a session".into());
+    }
+    let provider = AgentProvider::from_profile(&profile_id);
+    let external_session_id = external_session_id.trim().to_owned();
+    let runtime = state.runtime.clone();
+    let project_path = project.path.clone();
+    let project_id = project.id;
+    tauri::async_runtime::spawn_blocking(move || {
+        runtime
+            .lock()
+            .map_err(|error| error.to_string())?
+            .register_session(NewSessionBinding {
+                project_id,
+                profile_id: &profile_id,
+                provider,
+                external_session_id: &external_session_id,
+                source: SessionBindingSource::Manual,
+                verification: SessionVerification::Unverified,
+                display_name: display_name.as_deref(),
+                working_directory: &project_path,
+                state: SessionRuntimeState::NotLoaded,
+            })
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn push_task_to_session(
+    project_id: String,
+    task_id: String,
+    session_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PushOutcome, String> {
+    let project = registered_project(&project_id, &state)?;
+    let task = find_task(&project, &task_id, &state)?;
+    let pointer_prompt =
+        build_pointer_prompt(&project.path, &task).map_err(|error| error.to_string())?;
+    let session_id = Uuid::parse_str(&session_id).map_err(|error| error.to_string())?;
+    let session = state
+        .runtime
+        .lock()
+        .map_err(|error| error.to_string())?
+        .session(session_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("session binding not found: {session_id}"))?;
+    if session.project_id != project.id {
+        return Err("selected session belongs to another project".into());
+    }
+    if session.provider != AgentProvider::Codex {
+        return Err(format!(
+            "{} existing-session delivery is not implemented yet; no input was sent",
+            session.profile_id
+        ));
+    }
+    let attempt = state
+        .push_attempts
+        .lock()
+        .map_err(|error| error.to_string())?
+        .requested(project.id, &task_id, &session.profile_id)
+        .map_err(|error| error.to_string())?;
+    emit_or_log(&app, PUSH_ATTEMPT_EVENT, &attempt);
+    let (push, delivery_push, session) = {
+        let mut runtime = state.runtime.lock().map_err(|error| error.to_string())?;
+        let session = runtime
+            .session(session_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("session binding not found: {session_id}"))?;
+        let route = route_push(
+            PushMode::ExistingSession,
+            PushDeliveryPolicy::SafeBoundary,
+            session.state,
+            CODEX_CAPABILITIES,
+        )
+        .map_err(|error| format!("Codex Session {}: {error}", session.external_session_id))?;
+        let push = runtime
+            .enqueue_push(NewPush {
+                project_id: project.id,
+                task_id: &task_id,
+                selected_profile_id: None,
+                target_run_id: None,
+                target_session_id: Some(session.id),
+                mode: PushMode::ExistingSession,
+                delivery: PushDeliveryPolicy::SafeBoundary,
+                content: &pointer_prompt.text,
+                idempotency_key: &attempt.id.to_string(),
+            })
+            .map_err(|error| error.to_string())?;
+        let run = runtime
+            .create_run(
+                project.id,
+                &task_id,
+                &session.profile_id,
+                session.provider,
+                Some(session.id),
+                "starting",
+            )
+            .map_err(|error| error.to_string())?;
+        runtime
+            .resolve_push(push.id, run.id, session.id)
+            .map_err(|error| error.to_string())?;
+        let delivery_push = if matches!(route, PushRoute::AppendTurn | PushRoute::ResumeThenAppend)
+        {
+            let claimed = runtime
+                .claim_next_queued_push(session.id)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "Codex inbox was empty immediately after enqueue".to_owned())?;
+            runtime
+                .update_session_runtime(session.id, SessionRuntimeState::Starting, None)
+                .map_err(|error| error.to_string())?;
+            Some(claimed)
+        } else {
+            None
+        };
+        (push, delivery_push, session)
+    };
+    let Some(delivery_push) = delivery_push else {
+        return Ok(PushOutcome {
+            attempt,
+            pointer_prompt,
+            message: "已排队，将在当前 Codex Turn 完成后按顺序送达".into(),
+            session: Some(session),
+        });
+    };
+    let current_is_delivery = push.id == delivery_push.id;
+    let runtime = state.runtime.clone();
+    let attempts = state.push_attempts.clone();
+    let external_session_id = session.external_session_id.clone();
+    let prompt = delivery_push.content.clone();
+    let delivery_attempt_id = Uuid::parse_str(&delivery_push.idempotency_key)
+        .map_err(|_| "queued Codex push has an invalid local attempt ID".to_owned())?;
+    let delivery_push_id = delivery_push.id;
+    let current_attempt_id = attempt.id;
+    let app_for_worker = app.clone();
+    let delivery = tauri::async_runtime::spawn_blocking(move || {
+        let operation = (|| {
+            let mut codex = CodexAppSession::resume(&external_session_id)?;
+            let turn = codex.start_turn(&prompt)?;
+            {
+                let mut store = runtime.lock().map_err(|error| error.to_string())?;
+                store
+                    .update_session_runtime(
+                        session_id,
+                        SessionRuntimeState::Running,
+                        Some(&turn.turn_id),
+                    )
+                    .map_err(|error| error.to_string())?;
+                store
+                    .finish_delivery(
+                        delivery_push_id,
+                        PushStatus::Delivered,
+                        Some(&turn.turn_id),
+                        None,
+                        false,
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            let started = attempts
+                .lock()
+                .map_err(|error| error.to_string())?
+                .update(
+                    delivery_attempt_id,
+                    PushAttemptStatus::Started,
+                    Some(turn.process_id),
+                    None,
+                    PushDelivery::Process,
+                )
+                .map_err(|error| error.to_string())?;
+            emit_or_log(&app_for_worker, PUSH_ATTEMPT_EVENT, &started);
+            let runtime_for_monitor = runtime.clone();
+            let attempts_for_monitor = attempts.clone();
+            let app_for_monitor = app_for_worker.clone();
+            std::thread::spawn(move || {
+                monitor_codex_inbox(
+                    codex,
+                    session_id,
+                    turn,
+                    delivery_attempt_id,
+                    runtime_for_monitor,
+                    attempts_for_monitor,
+                    app_for_monitor,
+                );
+            });
+            Ok::<_, String>(started)
+        })();
+        if let Err(error) = &operation {
+            if let Ok(mut store) = runtime.lock() {
+                let _ = store.finish_delivery(
+                    delivery_push_id,
+                    PushStatus::Failed,
+                    None,
+                    Some(error),
+                    false,
+                );
+                let _ = store.update_session_runtime(session_id, SessionRuntimeState::Failed, None);
+            }
+            if let Ok(mut store) = attempts.lock()
+                && let Ok(failed) = store.update(
+                    delivery_attempt_id,
+                    PushAttemptStatus::FailedToStart,
+                    None,
+                    Some(error.clone()),
+                    PushDelivery::Process,
+                )
+            {
+                emit_or_log(&app_for_worker, PUSH_ATTEMPT_EVENT, &failed);
+            }
+        }
+        operation
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+
+    match delivery {
+        Ok(started) if current_is_delivery => Ok(PushOutcome {
+            attempt: started,
+            pointer_prompt,
+            message: "已追加到 Codex Session".into(),
+            session: Some(session),
+        }),
+        Ok(_) => Ok(PushOutcome {
+            attempt,
+            pointer_prompt,
+            message: "已恢复并开始投递较早的排队内容；本次 Push 将继续按 FIFO 等待".into(),
+            session: Some(session),
+        }),
+        Err(error) => Ok(PushOutcome {
+            attempt: state
+                .push_attempts
+                .lock()
+                .map_err(|lock_error| lock_error.to_string())?
+                .attempts()
+                .iter()
+                .find(|item| item.id == current_attempt_id)
+                .cloned()
+                .unwrap_or(attempt),
+            pointer_prompt,
+            message: format!("追加失败：{error}"),
+            session: Some(session),
+        }),
+    }
+}
+
+#[tauri::command]
 pub async fn push_task(
     project_id: String,
     task_id: String,
@@ -335,6 +632,21 @@ pub async fn push_task(
         .requested(project.id, &task_id, &profile_id)
         .map_err(|error| error.to_string())?;
     emit_or_log(&app, PUSH_ATTEMPT_EVENT, &attempt);
+
+    if profile_id == "codex" {
+        return push_new_codex_session(
+            project.id,
+            project.path,
+            task_id,
+            profile_id,
+            profile.display_name,
+            attempt,
+            pointer_prompt,
+            app,
+            &state,
+        )
+        .await;
+    }
 
     if prepared.launch_mode == LaunchMode::ClipboardOnly {
         return finish_clipboard_push(&state, &app, attempt, pointer_prompt);
@@ -381,6 +693,7 @@ pub async fn push_task(
                 attempt: started,
                 pointer_prompt,
                 message: format!("{} 已启动", profile.display_name),
+                session: None,
             })
         }
         Err(launch_error) => {
@@ -408,7 +721,346 @@ pub async fn push_task(
                 attempt: failed,
                 pointer_prompt,
                 message,
+                session: None,
             })
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn push_new_codex_session(
+    project_id: Uuid,
+    project_path: PathBuf,
+    task_id: String,
+    profile_id: String,
+    profile_name: String,
+    attempt: PushAttempt,
+    pointer_prompt: PointerPrompt,
+    app: AppHandle,
+    state: &State<'_, AppState>,
+) -> Result<PushOutcome, String> {
+    let runtime = state.runtime.clone();
+    let attempts = state.push_attempts.clone();
+    let prompt = pointer_prompt.text.clone();
+    let app_for_worker = app.clone();
+    let attempt_id = attempt.id;
+    let profile_name_for_worker = profile_name.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let push = {
+            let mut store = runtime.lock().map_err(|error| error.to_string())?;
+            let push = store
+                .enqueue_push(NewPush {
+                    project_id,
+                    task_id: &task_id,
+                    selected_profile_id: Some(&profile_id),
+                    target_run_id: None,
+                    target_session_id: None,
+                    mode: PushMode::NewSession,
+                    delivery: PushDeliveryPolicy::SafeBoundary,
+                    content: &prompt,
+                    idempotency_key: &attempt_id.to_string(),
+                })
+                .map_err(|error| error.to_string())?;
+            store
+                .begin_delivery(push.id)
+                .map_err(|error| error.to_string())?;
+            push
+        };
+
+        let operation = (|| {
+            let mut codex = CodexAppSession::create(&project_path)?;
+            let thread_id = codex.thread_id.clone();
+            let display_name = format!("{task_id} · {profile_name_for_worker}");
+            let (run, binding) = runtime
+                .lock()
+                .map_err(|error| error.to_string())?
+                .create_run_with_session(
+                    project_id,
+                    &task_id,
+                    &profile_id,
+                    AgentProvider::Codex,
+                    NewSessionBinding {
+                        project_id,
+                        profile_id: &profile_id,
+                        provider: AgentProvider::Codex,
+                        external_session_id: &thread_id,
+                        source: SessionBindingSource::Managed,
+                        verification: SessionVerification::Verified,
+                        display_name: Some(&display_name),
+                        working_directory: &project_path,
+                        state: SessionRuntimeState::Starting,
+                    },
+                    "starting",
+                )
+                .map_err(|error| error.to_string())?;
+            runtime
+                .lock()
+                .map_err(|error| error.to_string())?
+                .resolve_push(push.id, run.id, binding.id)
+                .map_err(|error| error.to_string())?;
+
+            let started_turn = codex.start_turn(&prompt)?;
+            {
+                let mut store = runtime.lock().map_err(|error| error.to_string())?;
+                store
+                    .update_session_runtime(
+                        binding.id,
+                        SessionRuntimeState::Running,
+                        Some(&started_turn.turn_id),
+                    )
+                    .map_err(|error| error.to_string())?;
+                store
+                    .finish_delivery(
+                        push.id,
+                        PushStatus::Delivered,
+                        Some(&started_turn.turn_id),
+                        None,
+                        false,
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+
+            let started_attempt = attempts
+                .lock()
+                .map_err(|error| error.to_string())?
+                .update(
+                    attempt_id,
+                    PushAttemptStatus::Started,
+                    Some(started_turn.process_id),
+                    None,
+                    PushDelivery::Process,
+                )
+                .map_err(|error| error.to_string())?;
+            emit_or_log(&app_for_worker, PUSH_ATTEMPT_EVENT, &started_attempt);
+
+            let runtime_for_monitor = runtime.clone();
+            let attempts_for_monitor = attempts.clone();
+            let app_for_monitor = app_for_worker.clone();
+            let binding_id = binding.id;
+            std::thread::spawn(move || {
+                monitor_codex_inbox(
+                    codex,
+                    binding_id,
+                    started_turn,
+                    attempt_id,
+                    runtime_for_monitor,
+                    attempts_for_monitor,
+                    app_for_monitor,
+                );
+            });
+            Ok::<_, String>((started_attempt, binding))
+        })();
+
+        match operation {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                if let Ok(mut store) = runtime.lock()
+                    && let Err(persist_error) = store.finish_delivery(
+                        push.id,
+                        PushStatus::Failed,
+                        None,
+                        Some(&error),
+                        false,
+                    )
+                {
+                    eprintln!("failed to persist Codex delivery failure: {persist_error}");
+                }
+                let failed = attempts
+                    .lock()
+                    .map_err(|lock_error| lock_error.to_string())?
+                    .update(
+                        attempt_id,
+                        PushAttemptStatus::FailedToStart,
+                        None,
+                        Some(error.clone()),
+                        PushDelivery::Process,
+                    )
+                    .map_err(|persist_error| persist_error.to_string())?;
+                emit_or_log(&app_for_worker, PUSH_ATTEMPT_EVENT, &failed);
+                Err(error)
+            }
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+
+    match result {
+        Ok((started, session)) => Ok(PushOutcome {
+            attempt: started,
+            pointer_prompt,
+            message: format!("{profile_name} 新 Session 已绑定并接收任务"),
+            session: Some(session),
+        }),
+        Err(error) => Ok(PushOutcome {
+            attempt: state
+                .push_attempts
+                .lock()
+                .map_err(|lock_error| lock_error.to_string())?
+                .attempts()
+                .iter()
+                .find(|item| item.id == attempt_id)
+                .cloned()
+                .unwrap_or(attempt),
+            pointer_prompt,
+            message: format!("Codex Session 启动失败：{error}"),
+            session: None,
+        }),
+    }
+}
+
+fn monitor_codex_inbox(
+    mut codex: CodexAppSession,
+    session_id: Uuid,
+    initial_turn: StartedTurn,
+    initial_attempt_id: Uuid,
+    runtime: std::sync::Arc<std::sync::Mutex<aurapilot_core::runtime_store::RuntimeStore>>,
+    attempts: std::sync::Arc<std::sync::Mutex<aurapilot_core::push_attempt::PushAttemptStore>>,
+    app: AppHandle,
+) {
+    let mut turn = initial_turn;
+    let mut attempt_id = Some(initial_attempt_id);
+    loop {
+        let completed = codex.wait_for_turn(&turn.turn_id);
+        if let Some(id) = attempt_id
+            && let Ok(mut store) = attempts.lock()
+            && let Ok(exited) = store.update(
+                id,
+                PushAttemptStatus::Exited,
+                Some(turn.process_id),
+                completed.as_ref().err().cloned(),
+                PushDelivery::Process,
+            )
+        {
+            emit_or_log(&app, PUSH_ATTEMPT_EVENT, &exited);
+        }
+        if let Err(error) = completed {
+            if let Ok(mut store) = runtime.lock()
+                && let Err(persist_error) =
+                    store.update_session_runtime(session_id, SessionRuntimeState::Failed, None)
+            {
+                eprintln!("failed to persist Codex session failure: {persist_error}");
+            }
+            eprintln!("Codex Session monitor stopped: {error}");
+            break;
+        }
+
+        let next = match runtime.lock() {
+            Ok(mut store) => {
+                if let Err(error) =
+                    store.update_session_runtime(session_id, SessionRuntimeState::Idle, None)
+                {
+                    eprintln!("failed to mark Codex session idle: {error}");
+                    break;
+                }
+                match store.claim_next_queued_push(session_id) {
+                    Ok(Some(push)) => {
+                        if let Err(error) = store.update_session_runtime(
+                            session_id,
+                            SessionRuntimeState::Starting,
+                            None,
+                        ) {
+                            eprintln!("failed to reserve Codex session delivery: {error}");
+                            let _ = store.finish_delivery(
+                                push.id,
+                                PushStatus::Failed,
+                                None,
+                                Some(&error.to_string()),
+                                true,
+                            );
+                            break;
+                        }
+                        push
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        eprintln!("failed to claim queued Codex push: {error}");
+                        break;
+                    }
+                }
+            }
+            Err(error) => {
+                eprintln!("runtime store lock poisoned while draining Codex inbox: {error}");
+                break;
+            }
+        };
+
+        attempt_id = Uuid::parse_str(&next.idempotency_key).ok();
+        match codex.start_turn(&next.content) {
+            Ok(started_turn) => {
+                let persisted =
+                    runtime
+                        .lock()
+                        .map_err(|error| error.to_string())
+                        .and_then(|mut store| {
+                            store
+                                .update_session_runtime(
+                                    session_id,
+                                    SessionRuntimeState::Running,
+                                    Some(&started_turn.turn_id),
+                                )
+                                .map_err(|error| error.to_string())?;
+                            store
+                                .finish_delivery(
+                                    next.id,
+                                    PushStatus::Delivered,
+                                    Some(&started_turn.turn_id),
+                                    None,
+                                    false,
+                                )
+                                .map_err(|error| error.to_string())?;
+                            Ok(())
+                        });
+                if let Err(error) = persisted {
+                    eprintln!("Codex accepted a queued push but persistence failed: {error}");
+                    if let Ok(mut store) = runtime.lock() {
+                        let _ = store.update_session_runtime(
+                            session_id,
+                            SessionRuntimeState::Failed,
+                            None,
+                        );
+                    }
+                    break;
+                }
+                if let Some(id) = attempt_id
+                    && let Ok(mut store) = attempts.lock()
+                    && let Ok(started) = store.update(
+                        id,
+                        PushAttemptStatus::Started,
+                        Some(started_turn.process_id),
+                        None,
+                        PushDelivery::Process,
+                    )
+                {
+                    emit_or_log(&app, PUSH_ATTEMPT_EVENT, &started);
+                }
+                turn = started_turn;
+            }
+            Err(error) => {
+                if let Ok(mut store) = runtime.lock() {
+                    let _ = store.finish_delivery(
+                        next.id,
+                        PushStatus::Failed,
+                        None,
+                        Some(&error),
+                        true,
+                    );
+                    let _ =
+                        store.update_session_runtime(session_id, SessionRuntimeState::Failed, None);
+                }
+                if let Some(id) = attempt_id
+                    && let Ok(mut store) = attempts.lock()
+                    && let Ok(failed) = store.update(
+                        id,
+                        PushAttemptStatus::FailedToStart,
+                        None,
+                        Some(error.clone()),
+                        PushDelivery::Process,
+                    )
+                {
+                    emit_or_log(&app, PUSH_ATTEMPT_EVENT, &failed);
+                }
+                break;
+            }
         }
     }
 }
@@ -479,6 +1131,7 @@ fn finish_clipboard_push(
                 attempt: started,
                 pointer_prompt,
                 message: "Pointer Prompt 已复制到剪贴板".into(),
+                session: None,
             })
         }
         Err(error) => {
@@ -496,6 +1149,7 @@ fn finish_clipboard_push(
                 attempt: failed,
                 pointer_prompt,
                 message: format!("复制 Pointer Prompt 失败：{message}"),
+                session: None,
             })
         }
     }

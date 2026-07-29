@@ -1,12 +1,14 @@
 mod commands;
 mod platform;
+mod providers;
 mod state;
 
 use commands::{
-    add_project, create_task, delete_agent_profile, delete_task, initialize_project,
-    list_agent_profiles, list_projects, list_push_attempts, preview_pointer_prompt, push_task,
-    remove_project, save_agent_profile, scan_project, scan_projects, test_agent_profile,
-    transition_task, update_task,
+    add_project, bind_agent_session, create_task, delete_agent_profile, delete_task,
+    initialize_project, list_agent_profiles, list_agent_sessions, list_projects,
+    list_push_attempts, preview_pointer_prompt, push_task, push_task_to_session, remove_project,
+    save_agent_profile, scan_project, scan_projects, test_agent_profile, transition_task,
+    update_task,
 };
 use state::AppState;
 use tauri::{Emitter, Manager};
@@ -46,6 +48,9 @@ pub fn run() {
             preview_pointer_prompt,
             push_task,
             list_push_attempts,
+            list_agent_sessions,
+            bind_agent_session,
+            push_task_to_session,
             test_agent_profile
         ])
         .run(tauri::generate_context!())

@@ -19,13 +19,22 @@ pub fn push_attempt_path() -> io::Result<PathBuf> {
     Ok(config_directory()?.join("push-attempts.json"))
 }
 
+pub fn runtime_database_path() -> io::Result<PathBuf> {
+    Ok(config_directory()?.join("runtime.sqlite3"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn local_paths_do_not_depend_on_the_tauri_identifier() {
-        for path in [registry_path(), profile_path(), push_attempt_path()] {
+        for path in [
+            registry_path(),
+            profile_path(),
+            push_attempt_path(),
+            runtime_database_path(),
+        ] {
             let path = path.unwrap();
             assert!(
                 path.components()

@@ -1,6 +1,11 @@
 # Product and design working documents
 .auradoc/
 
+# Repository-local Agent instructions and AuraPilot task state
+.aurapilot/
+AGENTS.md
+ANTI_FAKE_AGENTS.md
+
 # Dependencies
 node_modules/
 web/node_modules/
@@ -48,5 +53,5 @@ Desktop.ini
 *.pem
 src-tauri/gen/
 
-# Local AuraPilot runtime state
+# Local AuraPilot runtime state outside the task protocol
 .aurapilot-local/

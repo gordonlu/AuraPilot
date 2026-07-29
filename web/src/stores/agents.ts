@@ -4,6 +4,7 @@ import { invokeBackend } from '../backend'
 import type {
   AgentLaunchProfile,
   AgentProfileEntry,
+  AgentSessionBinding,
   PointerPrompt,
   PushOutcome,
 } from '../types/protocol'
@@ -48,6 +49,7 @@ export const useAgentsStore = defineStore('agents', {
     profiles: [] as AgentProfileEntry[],
     loading: false,
     error: null as string | null,
+    sessions: [] as AgentSessionBinding[],
   }),
   actions: {
     async load() {
@@ -73,6 +75,35 @@ export const useAgentsStore = defineStore('agents', {
         text: `执行 AuraPilot 任务 ${taskId}。\n\n开始前必须读取：\n1. .aurapilot/AGENTS.md\n2. .aurapilot/tasks/backlog/${taskId}.yaml\n\n任务文件和协议文件是唯一事实来源。\n请按协议领取任务、执行、验证并更新进度。`,
       }
     },
+    async loadSessions(projectId: string) {
+      this.sessions = isTauri()
+        ? await invokeBackend<AgentSessionBinding[]>('list_agent_sessions', { projectId })
+        : []
+    },
+    async bindSession(
+      projectId: string,
+      profileId: string,
+      externalSessionId: string,
+      displayName?: string,
+    ) {
+      const session = isTauri()
+        ? await invokeBackend<AgentSessionBinding>('bind_agent_session', {
+          projectId, profileId, externalSessionId, displayName: displayName || null,
+        })
+        : {
+          id: crypto.randomUUID(), project_id: projectId, profile_id: profileId,
+          provider: profileId === 'codex' ? 'codex' as const : 'other' as const,
+          external_session_id: externalSessionId, source: 'manual' as const,
+          verification: 'unverified' as const, display_name: displayName || null,
+          working_directory: '/demo/repository', state: 'not_loaded' as const,
+          active_turn_id: null, hidden: false, created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(), last_used_at: new Date().toISOString(),
+        }
+      const index = this.sessions.findIndex((item) => item.id === session.id)
+      if (index >= 0) this.sessions[index] = session
+      else this.sessions.unshift(session)
+      return session
+    },
     async push(projectId: string, taskId: string, profileId: string): Promise<PushOutcome> {
       if (isTauri()) return invokeBackend('push_task', { projectId, taskId, profileId })
       const pointer_prompt = await this.preview(projectId, taskId)
@@ -83,6 +114,20 @@ export const useAgentsStore = defineStore('agents', {
           id: crypto.randomUUID(), task_id: taskId, project_id: projectId,
           agent_profile_id: profileId, created_at: new Date().toISOString(), status: 'started',
           process_id: 1000, error: null, delivery: profileId === 'clipboard-only' ? 'clipboard' : 'process',
+        },
+      }
+    },
+    async pushExisting(projectId: string, taskId: string, sessionId: string): Promise<PushOutcome> {
+      if (isTauri()) return invokeBackend('push_task_to_session', { projectId, taskId, sessionId })
+      const pointer_prompt = await this.preview(projectId, taskId)
+      const session = this.sessions.find((item) => item.id === sessionId) ?? null
+      return {
+        pointer_prompt, session,
+        message: '已追加到现有 Session（演示）',
+        attempt: {
+          id: crypto.randomUUID(), task_id: taskId, project_id: projectId,
+          agent_profile_id: session?.profile_id ?? 'codex', created_at: new Date().toISOString(),
+          status: 'started', process_id: 1000, error: null, delivery: 'process',
         },
       }
     },

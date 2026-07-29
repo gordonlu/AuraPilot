@@ -21,6 +21,7 @@ pub struct CoreConfig {
     pub max_profile_args: usize,
     pub max_profile_value_bytes: usize,
     pub max_profile_id_bytes: usize,
+    pub sqlite_busy_timeout: Duration,
 }
 
 impl Default for CoreConfig {
@@ -42,6 +43,7 @@ impl Default for CoreConfig {
             max_profile_args: 64,
             max_profile_value_bytes: 16_384,
             max_profile_id_bytes: 64,
+            sqlite_busy_timeout: Duration::from_secs(3),
         }
     }
 }
@@ -67,5 +69,6 @@ mod tests {
         assert_eq!(config.max_profile_args, 64);
         assert_eq!(config.max_profile_value_bytes, 16_384);
         assert_eq!(config.max_profile_id_bytes, 64);
+        assert_eq!(config.sqlite_busy_timeout, Duration::from_secs(3));
     }
 }

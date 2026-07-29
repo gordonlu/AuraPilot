@@ -146,4 +146,30 @@ export interface PushOutcome {
   attempt: PushAttempt
   pointer_prompt: PointerPrompt
   message: string
+  session?: AgentSessionBinding | null
+}
+
+export type AgentProvider = 'codex' | 'claude_code' | 'open_code' | 'other'
+export type SessionBindingSource = 'managed' | 'discovered' | 'integration_reported' | 'manual'
+export type SessionVerification = 'verified' | 'unverified' | 'unavailable'
+export type SessionRuntimeState =
+  | 'starting' | 'idle' | 'running' | 'waiting_approval'
+  | 'interrupting' | 'not_loaded' | 'terminated' | 'failed'
+
+export interface AgentSessionBinding {
+  id: string
+  project_id: string
+  profile_id: string
+  provider: AgentProvider
+  external_session_id: string
+  source: SessionBindingSource
+  verification: SessionVerification
+  display_name: string | null
+  working_directory: string
+  state: SessionRuntimeState
+  active_turn_id: string | null
+  hidden: boolean
+  created_at: string
+  updated_at: string
+  last_used_at: string
 }
