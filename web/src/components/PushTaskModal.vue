@@ -20,6 +20,10 @@ const manualName = ref('')
 
 const selectedEntry = computed(() => agents.profiles.find((entry) => entry.profile.id === selectedProfile.value))
 const selectedBinding = computed(() => agents.sessions.find((session) => session.id === selectedSession.value))
+const canForkSession = computed(() => selectedBinding.value?.provider === 'codex'
+  && ['idle', 'not_loaded'].includes(selectedBinding.value.state))
+const canControlLiveTurn = computed(() => selectedBinding.value?.provider === 'codex'
+  && selectedBinding.value.state === 'running' && Boolean(selectedBinding.value.active_turn_id))
 const copiesOnly = computed(() => selectedEntry.value?.profile.launch_mode === 'clipboard_only')
 const primaryLabel = computed(() => {
   if (busy.value) return mode.value === 'existing' ? '正在追加…' : copiesOnly.value ? '正在复制…' : '正在创建并绑定…'
@@ -60,6 +64,14 @@ const bindManual = async () => {
   finally { busy.value = false }
 }
 
+const applySessionOutcome = (result: PushOutcome) => {
+  if (!result.session) return
+  const index = agents.sessions.findIndex((item) => item.id === result.session?.id)
+  if (index >= 0) agents.sessions[index] = result.session
+  else agents.sessions.unshift(result.session)
+  selectedSession.value = result.session.id
+}
+
 const push = async () => {
   if (!props.task.document.id || !canSubmit.value) return
   busy.value = true; error.value = null; outcome.value = null
@@ -68,12 +80,33 @@ const push = async () => {
       ? await agents.pushExisting(props.project.registration.id, props.task.document.id, selectedSession.value)
       : await agents.push(props.project.registration.id, props.task.document.id, selectedProfile.value)
     if (mode.value === 'new') props.project.registration.last_profile_id = selectedProfile.value
-    if (outcome.value.session) {
-      const index = agents.sessions.findIndex((item) => item.id === outcome.value?.session?.id)
-      if (index >= 0) agents.sessions[index] = outcome.value.session
-      else agents.sessions.unshift(outcome.value.session)
-      selectedSession.value = outcome.value.session.id
-    }
+    applySessionOutcome(outcome.value)
+  } catch (caught) { error.value = String(caught) }
+  finally { busy.value = false }
+}
+
+const forkSession = async () => {
+  if (!props.task.document.id || !selectedBinding.value || !canForkSession.value) return
+  busy.value = true; error.value = null; outcome.value = null
+  try {
+    outcome.value = await agents.forkExisting(
+      props.project.registration.id,
+      props.task.document.id,
+      selectedBinding.value.id,
+    )
+    applySessionOutcome(outcome.value)
+  } catch (caught) { error.value = String(caught) }
+  finally { busy.value = false }
+}
+
+const controlLiveTurn = async (action: 'steer' | 'interrupt') => {
+  if (!props.task.document.id || !selectedBinding.value || !canControlLiveTurn.value) return
+  busy.value = true; error.value = null; outcome.value = null
+  try {
+    outcome.value = action === 'steer'
+      ? await agents.steerExisting(props.project.registration.id, props.task.document.id, selectedBinding.value.id)
+      : await agents.interruptExisting(props.project.registration.id, props.task.document.id, selectedBinding.value.id)
+    applySessionOutcome(outcome.value)
   } catch (caught) { error.value = String(caught) }
   finally { busy.value = false }
 }
@@ -116,6 +149,12 @@ const push = async () => {
             </button>
           </div>
           <div v-else class="session-empty"><strong>这个项目还没有已记录的 Session</strong><span>可以先新建 Session，或手动绑定已有 ID。</span></div>
+          <div v-if="selectedBinding?.provider === 'codex'" class="session-actions">
+            <button v-if="canControlLiveTurn" class="button secondary" :disabled="busy" @click="controlLiveTurn('steer')"><UiIcon name="send" :size="14"/>追加到当前 Turn</button>
+            <button v-if="canControlLiveTurn" class="button secondary" :disabled="busy" @click="controlLiveTurn('interrupt')"><UiIcon name="x" :size="14"/>中断后追加</button>
+            <button class="button secondary" :disabled="busy || !canForkSession" @click="forkSession"><UiIcon name="git-branch" :size="14"/>创建 Session 分支并 Push</button>
+            <small>{{ canControlLiveTurn ? '默认 Push 仍会安全排队；以上操作只在你明确选择时执行。' : canForkSession ? '复制 Codex 会话历史并生成新的 Session ID；这不会创建 Git 分支。' : '当前 Session 不可执行这些显式操作。' }}</small>
+          </div>
           <button class="button secondary manual-bind-toggle" @click="showManual = !showManual"><UiIcon name="plus" :size="14"/>手动绑定 Session ID</button>
           <form v-if="showManual" class="manual-session-form" @submit.prevent="bindManual">
             <label class="field"><span>Profile</span><select v-model="selectedProfile"><option v-for="entry in agents.profiles.filter((item) => item.profile.launch_mode !== 'clipboard_only')" :key="entry.profile.id" :value="entry.profile.id">{{ entry.profile.display_name }}</option></select></label>

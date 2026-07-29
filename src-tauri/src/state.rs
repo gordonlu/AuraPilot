@@ -1,3 +1,4 @@
+use crate::providers::codex::CodexLiveHandle;
 use aurapilot_core::app_paths::{
     profile_path, push_attempt_path, registry_path, runtime_database_path,
 };
@@ -7,7 +8,9 @@ use aurapilot_core::project_registry::ProjectRegistry;
 use aurapilot_core::push_attempt::PushAttemptStore;
 use aurapilot_core::runtime_store::RuntimeStore;
 use aurapilot_core::watcher::{ProjectChange, ProjectWatchService};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use uuid::Uuid;
 
 pub struct AppState {
     pub config: CoreConfig,
@@ -15,6 +18,7 @@ pub struct AppState {
     pub profiles: Mutex<AgentProfileRegistry>,
     pub push_attempts: Arc<Mutex<PushAttemptStore>>,
     pub runtime: Arc<Mutex<RuntimeStore>>,
+    pub codex_sessions: Arc<Mutex<HashMap<Uuid, CodexLiveHandle>>>,
     pub watchers: Mutex<ProjectWatchService>,
 }
 
@@ -53,6 +57,7 @@ impl AppState {
             profiles: Mutex::new(profiles),
             push_attempts: Arc::new(Mutex::new(push_attempts)),
             runtime: Arc::new(Mutex::new(runtime)),
+            codex_sessions: Arc::new(Mutex::new(HashMap::new())),
             watchers: Mutex::new(watchers),
         })
     }

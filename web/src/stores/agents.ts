@@ -131,6 +131,59 @@ export const useAgentsStore = defineStore('agents', {
         },
       }
     },
+    async forkExisting(projectId: string, taskId: string, sessionId: string): Promise<PushOutcome> {
+      if (isTauri()) return invokeBackend('fork_task_session', { projectId, taskId, sessionId })
+      const pointer_prompt = await this.preview(projectId, taskId)
+      const source = this.sessions.find((item) => item.id === sessionId)
+      const session = source ? {
+        ...source,
+        id: crypto.randomUUID(),
+        external_session_id: `thr_fork_${crypto.randomUUID().slice(0, 8)}`,
+        display_name: `${source.display_name || source.profile_id} 分支`,
+        state: 'running' as const,
+        active_turn_id: 'turn_demo',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        last_used_at: new Date().toISOString(),
+      } : null
+      return {
+        pointer_prompt, session,
+        message: '已创建 Codex Session 分支并接收任务（演示）',
+        attempt: {
+          id: crypto.randomUUID(), task_id: taskId, project_id: projectId,
+          agent_profile_id: source?.profile_id ?? 'codex', created_at: new Date().toISOString(),
+          status: 'started', process_id: 1000, error: null, delivery: 'process',
+        },
+      }
+    },
+    async steerExisting(projectId: string, taskId: string, sessionId: string): Promise<PushOutcome> {
+      if (isTauri()) return invokeBackend('steer_task_session', { projectId, taskId, sessionId })
+      const pointer_prompt = await this.preview(projectId, taskId)
+      const session = this.sessions.find((item) => item.id === sessionId) ?? null
+      return {
+        pointer_prompt, session, message: '已追加到 Codex 当前 Turn（演示）',
+        attempt: {
+          id: crypto.randomUUID(), task_id: taskId, project_id: projectId,
+          agent_profile_id: session?.profile_id ?? 'codex', created_at: new Date().toISOString(),
+          status: 'started', process_id: null, error: null, delivery: 'process',
+        },
+      }
+    },
+    async interruptExisting(projectId: string, taskId: string, sessionId: string): Promise<PushOutcome> {
+      if (isTauri()) return invokeBackend('interrupt_task_session', { projectId, taskId, sessionId })
+      const pointer_prompt = await this.preview(projectId, taskId)
+      const source = this.sessions.find((item) => item.id === sessionId) ?? null
+      const session = source ? { ...source, state: 'interrupting' as const } : null
+      return {
+        pointer_prompt, session,
+        message: '已请求中断；将在 turn/completed 后按 FIFO 追加到原 Session（演示）',
+        attempt: {
+          id: crypto.randomUUID(), task_id: taskId, project_id: projectId,
+          agent_profile_id: session?.profile_id ?? 'codex', created_at: new Date().toISOString(),
+          status: 'requested', process_id: null, error: null, delivery: 'process',
+        },
+      }
+    },
     async save(profile: AgentLaunchProfile) {
       if (isTauri()) {
         const entry = await invokeBackend<AgentProfileEntry>('save_agent_profile', { profile })

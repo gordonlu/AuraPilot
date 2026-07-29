@@ -1,4 +1,4 @@
-use crate::providers::codex::{CodexAppSession, StartedTurn};
+use crate::providers::codex::{CodexAppSession, CodexLiveHandle, StartedTurn};
 use crate::state::AppState;
 use crate::{PUSH_ATTEMPT_EVENT, platform};
 use aurapilot_core::agent_profile::{
@@ -355,12 +355,20 @@ pub async fn bind_agent_session(
     if profile.launch_mode == LaunchMode::ClipboardOnly {
         return Err("clipboard-only profiles cannot own a session".into());
     }
-    let provider = AgentProvider::from_profile(&profile_id);
+    let provider = AgentProvider::from_profile_and_executable(&profile_id, &profile.executable);
     let external_session_id = external_session_id.trim().to_owned();
     let runtime = state.runtime.clone();
     let project_path = project.path.clone();
     let project_id = project.id;
+    let request_timeout = state.config.agent_request_timeout;
     tauri::async_runtime::spawn_blocking(move || {
+        let verification = if provider == AgentProvider::Codex
+            && CodexAppSession::verify_thread(&external_session_id, request_timeout).is_ok()
+        {
+            SessionVerification::Verified
+        } else {
+            SessionVerification::Unverified
+        };
         runtime
             .lock()
             .map_err(|error| error.to_string())?
@@ -370,7 +378,7 @@ pub async fn bind_agent_session(
                 provider,
                 external_session_id: &external_session_id,
                 source: SessionBindingSource::Manual,
-                verification: SessionVerification::Unverified,
+                verification,
                 display_name: display_name.as_deref(),
                 working_directory: &project_path,
                 state: SessionRuntimeState::NotLoaded,
@@ -482,16 +490,18 @@ pub async fn push_task_to_session(
     let current_is_delivery = push.id == delivery_push.id;
     let runtime = state.runtime.clone();
     let attempts = state.push_attempts.clone();
+    let codex_sessions = state.codex_sessions.clone();
     let external_session_id = session.external_session_id.clone();
     let prompt = delivery_push.content.clone();
     let delivery_attempt_id = Uuid::parse_str(&delivery_push.idempotency_key)
         .map_err(|_| "queued Codex push has an invalid local attempt ID".to_owned())?;
     let delivery_push_id = delivery_push.id;
     let current_attempt_id = attempt.id;
+    let request_timeout = state.config.agent_request_timeout;
     let app_for_worker = app.clone();
     let delivery = tauri::async_runtime::spawn_blocking(move || {
         let operation = (|| {
-            let mut codex = CodexAppSession::resume(&external_session_id)?;
+            let mut codex = CodexAppSession::resume(&external_session_id, request_timeout)?;
             let turn = codex.start_turn(&prompt)?;
             {
                 let mut store = runtime.lock().map_err(|error| error.to_string())?;
@@ -524,6 +534,11 @@ pub async fn push_task_to_session(
                 )
                 .map_err(|error| error.to_string())?;
             emit_or_log(&app_for_worker, PUSH_ATTEMPT_EVENT, &started);
+            let live_handle = codex.live_handle();
+            codex_sessions
+                .lock()
+                .map_err(|error| error.to_string())?
+                .insert(session_id, live_handle.clone());
             let runtime_for_monitor = runtime.clone();
             let attempts_for_monitor = attempts.clone();
             let app_for_monitor = app_for_worker.clone();
@@ -533,9 +548,13 @@ pub async fn push_task_to_session(
                     session_id,
                     turn,
                     delivery_attempt_id,
-                    runtime_for_monitor,
-                    attempts_for_monitor,
-                    app_for_monitor,
+                    CodexMonitorContext {
+                        runtime: runtime_for_monitor,
+                        attempts: attempts_for_monitor,
+                        codex_sessions,
+                        live_handle,
+                        app: app_for_monitor,
+                    },
                 );
             });
             Ok::<_, String>(started)
@@ -594,6 +613,533 @@ pub async fn push_task_to_session(
             pointer_prompt,
             message: format!("追加失败：{error}"),
             session: Some(session),
+        }),
+    }
+}
+
+#[tauri::command]
+pub async fn steer_task_session(
+    project_id: String,
+    task_id: String,
+    session_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PushOutcome, String> {
+    let project = registered_project(&project_id, &state)?;
+    let task = find_task(&project, &task_id, &state)?;
+    let pointer_prompt =
+        build_pointer_prompt(&project.path, &task).map_err(|error| error.to_string())?;
+    let session_id = Uuid::parse_str(&session_id).map_err(|error| error.to_string())?;
+    let session = state
+        .runtime
+        .lock()
+        .map_err(|error| error.to_string())?
+        .session(session_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("session binding not found: {session_id}"))?;
+    if session.project_id != project.id || session.provider != AgentProvider::Codex {
+        return Err("selected Session is not a Codex Session in this project".into());
+    }
+    let active_turn_id = session
+        .active_turn_id
+        .clone()
+        .filter(|_| session.state == SessionRuntimeState::Running)
+        .ok_or_else(|| "Codex Session 没有可 Steer 的活动 Turn".to_owned())?;
+    let live = state
+        .codex_sessions
+        .lock()
+        .map_err(|error| error.to_string())?
+        .get(&session_id)
+        .cloned()
+        .ok_or_else(|| "Codex Live Session 连接不可用；没有发送任何输入".to_owned())?;
+    let attempt = state
+        .push_attempts
+        .lock()
+        .map_err(|error| error.to_string())?
+        .requested(project.id, &task_id, &session.profile_id)
+        .map_err(|error| error.to_string())?;
+    emit_or_log(&app, PUSH_ATTEMPT_EVENT, &attempt);
+    let push = {
+        let mut store = state.runtime.lock().map_err(|error| error.to_string())?;
+        let current = store
+            .session(session_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("session binding not found: {session_id}"))?;
+        if current.state != SessionRuntimeState::Running
+            || current.active_turn_id.as_deref() != Some(&active_turn_id)
+        {
+            return Err("Codex 活动 Turn 已变化；请重新选择投递方式".into());
+        }
+        let push = store
+            .enqueue_push(NewPush {
+                project_id: project.id,
+                task_id: &task_id,
+                selected_profile_id: None,
+                target_run_id: None,
+                target_session_id: Some(session_id),
+                mode: PushMode::ExistingSession,
+                delivery: PushDeliveryPolicy::SteerCurrentTurn,
+                content: &pointer_prompt.text,
+                idempotency_key: &attempt.id.to_string(),
+            })
+            .map_err(|error| error.to_string())?;
+        let run = store
+            .create_run(
+                project.id,
+                &task_id,
+                &session.profile_id,
+                AgentProvider::Codex,
+                Some(session_id),
+                "steering",
+            )
+            .map_err(|error| error.to_string())?;
+        store
+            .resolve_push(push.id, run.id, session_id)
+            .map_err(|error| error.to_string())?;
+        store
+            .begin_delivery(push.id)
+            .map_err(|error| error.to_string())?;
+        push
+    };
+    let runtime = state.runtime.clone();
+    let attempts = state.push_attempts.clone();
+    let app_for_worker = app.clone();
+    let prompt = pointer_prompt.text.clone();
+    let attempt_id = attempt.id;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let delivery = live.steer_turn(&active_turn_id, &prompt);
+        match delivery {
+            Ok(receipt) => {
+                runtime
+                    .lock()
+                    .map_err(|error| error.to_string())?
+                    .finish_delivery(push.id, PushStatus::Delivered, Some(&receipt), None, false)
+                    .map_err(|error| error.to_string())?;
+                let started = attempts
+                    .lock()
+                    .map_err(|error| error.to_string())?
+                    .update(
+                        attempt_id,
+                        PushAttemptStatus::Started,
+                        None,
+                        None,
+                        PushDelivery::Process,
+                    )
+                    .map_err(|error| error.to_string())?;
+                emit_or_log(&app_for_worker, PUSH_ATTEMPT_EVENT, &started);
+                Ok(started)
+            }
+            Err(error) => {
+                if let Ok(mut store) = runtime.lock() {
+                    let _ = store.finish_delivery(
+                        push.id,
+                        PushStatus::Failed,
+                        None,
+                        Some(&error),
+                        true,
+                    );
+                }
+                if let Ok(mut store) = attempts.lock()
+                    && let Ok(failed) = store.update(
+                        attempt_id,
+                        PushAttemptStatus::FailedToStart,
+                        None,
+                        Some(error.clone()),
+                        PushDelivery::Process,
+                    )
+                {
+                    emit_or_log(&app_for_worker, PUSH_ATTEMPT_EVENT, &failed);
+                }
+                Err(error)
+            }
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    match result {
+        Ok(started) => Ok(PushOutcome {
+            attempt: started,
+            pointer_prompt,
+            message: "已追加到 Codex 当前 Turn".into(),
+            session: Some(session),
+        }),
+        Err(error) => Ok(PushOutcome {
+            attempt: state
+                .push_attempts
+                .lock()
+                .map_err(|lock_error| lock_error.to_string())?
+                .attempts()
+                .iter()
+                .find(|item| item.id == attempt_id)
+                .cloned()
+                .unwrap_or(attempt),
+            pointer_prompt,
+            message: format!("Steer 失败，未创建新 Session：{error}"),
+            session: Some(session),
+        }),
+    }
+}
+
+#[tauri::command]
+pub async fn interrupt_task_session(
+    project_id: String,
+    task_id: String,
+    session_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PushOutcome, String> {
+    let project = registered_project(&project_id, &state)?;
+    let task = find_task(&project, &task_id, &state)?;
+    let pointer_prompt =
+        build_pointer_prompt(&project.path, &task).map_err(|error| error.to_string())?;
+    let session_id = Uuid::parse_str(&session_id).map_err(|error| error.to_string())?;
+    let session = state
+        .runtime
+        .lock()
+        .map_err(|error| error.to_string())?
+        .session(session_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("session binding not found: {session_id}"))?;
+    if session.project_id != project.id || session.provider != AgentProvider::Codex {
+        return Err("selected Session is not a Codex Session in this project".into());
+    }
+    let active_turn_id = session
+        .active_turn_id
+        .clone()
+        .filter(|_| session.state == SessionRuntimeState::Running)
+        .ok_or_else(|| "Codex Session 没有可中断的活动 Turn".to_owned())?;
+    let live = state
+        .codex_sessions
+        .lock()
+        .map_err(|error| error.to_string())?
+        .get(&session_id)
+        .cloned()
+        .ok_or_else(|| "Codex Live Session 连接不可用；没有发送任何输入".to_owned())?;
+    let attempt = state
+        .push_attempts
+        .lock()
+        .map_err(|error| error.to_string())?
+        .requested(project.id, &task_id, &session.profile_id)
+        .map_err(|error| error.to_string())?;
+    emit_or_log(&app, PUSH_ATTEMPT_EVENT, &attempt);
+    let push = {
+        let mut store = state.runtime.lock().map_err(|error| error.to_string())?;
+        let current = store
+            .session(session_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("session binding not found: {session_id}"))?;
+        if current.state != SessionRuntimeState::Running
+            || current.active_turn_id.as_deref() != Some(&active_turn_id)
+        {
+            return Err("Codex 活动 Turn 已变化；请重新选择投递方式".into());
+        }
+        let push = store
+            .enqueue_push(NewPush {
+                project_id: project.id,
+                task_id: &task_id,
+                selected_profile_id: None,
+                target_run_id: None,
+                target_session_id: Some(session_id),
+                mode: PushMode::ExistingSession,
+                delivery: PushDeliveryPolicy::InterruptThenAppend,
+                content: &pointer_prompt.text,
+                idempotency_key: &attempt.id.to_string(),
+            })
+            .map_err(|error| error.to_string())?;
+        let run = store
+            .create_run(
+                project.id,
+                &task_id,
+                &session.profile_id,
+                AgentProvider::Codex,
+                Some(session_id),
+                "interrupting",
+            )
+            .map_err(|error| error.to_string())?;
+        store
+            .resolve_push(push.id, run.id, session_id)
+            .map_err(|error| error.to_string())?;
+        store
+            .update_session_runtime(
+                session_id,
+                SessionRuntimeState::Interrupting,
+                Some(&active_turn_id),
+            )
+            .map_err(|error| error.to_string())?;
+        push
+    };
+    let runtime = state.runtime.clone();
+    let interrupt_turn_id = active_turn_id.clone();
+    let result =
+        tauri::async_runtime::spawn_blocking(move || live.interrupt_turn(&interrupt_turn_id))
+            .await
+            .map_err(|error| error.to_string())?;
+    if let Err(error) = result {
+        let mut store = runtime
+            .lock()
+            .map_err(|lock_error| lock_error.to_string())?;
+        if let Ok(record) = store.push(push.id)
+            && record.is_some_and(|record| record.status == PushStatus::Queued)
+        {
+            store
+                .begin_delivery(push.id)
+                .map_err(|persist_error| persist_error.to_string())?;
+            store
+                .finish_delivery(push.id, PushStatus::Failed, None, Some(&error), true)
+                .map_err(|persist_error| persist_error.to_string())?;
+            store
+                .update_session_runtime(
+                    session_id,
+                    SessionRuntimeState::Running,
+                    Some(&active_turn_id),
+                )
+                .map_err(|persist_error| persist_error.to_string())?;
+        }
+        let failed = state
+            .push_attempts
+            .lock()
+            .map_err(|lock_error| lock_error.to_string())?
+            .update(
+                attempt.id,
+                PushAttemptStatus::FailedToStart,
+                None,
+                Some(error.clone()),
+                PushDelivery::Process,
+            )
+            .map_err(|persist_error| persist_error.to_string())?;
+        emit_or_log(&app, PUSH_ATTEMPT_EVENT, &failed);
+        return Ok(PushOutcome {
+            attempt: failed,
+            pointer_prompt,
+            message: format!("中断失败，未创建新 Session：{error}"),
+            session: Some(session),
+        });
+    }
+    let current = runtime
+        .lock()
+        .map_err(|error| error.to_string())?
+        .session(session_id)
+        .map_err(|error| error.to_string())?
+        .unwrap_or(session);
+    Ok(PushOutcome {
+        attempt,
+        pointer_prompt,
+        message: "已请求中断；将在 turn/completed 后按 FIFO 追加到原 Session".into(),
+        session: Some(current),
+    })
+}
+
+#[tauri::command]
+pub async fn fork_task_session(
+    project_id: String,
+    task_id: String,
+    session_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PushOutcome, String> {
+    let project = registered_project(&project_id, &state)?;
+    let task = find_task(&project, &task_id, &state)?;
+    let pointer_prompt =
+        build_pointer_prompt(&project.path, &task).map_err(|error| error.to_string())?;
+    let session_id = Uuid::parse_str(&session_id).map_err(|error| error.to_string())?;
+    let source = state
+        .runtime
+        .lock()
+        .map_err(|error| error.to_string())?
+        .session(session_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("session binding not found: {session_id}"))?;
+    if source.project_id != project.id {
+        return Err("selected session belongs to another project".into());
+    }
+    if source.provider != AgentProvider::Codex {
+        return Err("this Provider does not support Session fork".into());
+    }
+    if !matches!(
+        source.state,
+        SessionRuntimeState::Idle | SessionRuntimeState::NotLoaded
+    ) {
+        return Err("Codex Session 正在工作；请等待其空闲后再创建 Session 分支".into());
+    }
+    let attempt = state
+        .push_attempts
+        .lock()
+        .map_err(|error| error.to_string())?
+        .requested(project.id, &task_id, &source.profile_id)
+        .map_err(|error| error.to_string())?;
+    emit_or_log(&app, PUSH_ATTEMPT_EVENT, &attempt);
+    let source_original_state = source.state;
+    let push = {
+        let mut store = state.runtime.lock().map_err(|error| error.to_string())?;
+        let current = store
+            .session(source.id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("session binding not found: {}", source.id))?;
+        if !matches!(
+            current.state,
+            SessionRuntimeState::Idle | SessionRuntimeState::NotLoaded
+        ) {
+            return Err("Codex Session 状态已变化；请等待其空闲后重试".into());
+        }
+        let push = store
+            .enqueue_push(NewPush {
+                project_id: project.id,
+                task_id: &task_id,
+                selected_profile_id: None,
+                target_run_id: None,
+                target_session_id: Some(source.id),
+                mode: PushMode::Fork,
+                delivery: PushDeliveryPolicy::SafeBoundary,
+                content: &pointer_prompt.text,
+                idempotency_key: &attempt.id.to_string(),
+            })
+            .map_err(|error| error.to_string())?;
+        store
+            .begin_delivery(push.id)
+            .map_err(|error| error.to_string())?;
+        store
+            .update_session_runtime(source.id, SessionRuntimeState::Starting, None)
+            .map_err(|error| error.to_string())?;
+        push
+    };
+    let runtime = state.runtime.clone();
+    let attempts = state.push_attempts.clone();
+    let codex_sessions = state.codex_sessions.clone();
+    let source_thread_id = source.external_session_id.clone();
+    let profile_id = source.profile_id.clone();
+    let project_path = project.path.clone();
+    let prompt = pointer_prompt.text.clone();
+    let task_id_for_worker = task_id.clone();
+    let attempt_id = attempt.id;
+    let app_for_worker = app.clone();
+    let request_timeout = state.config.agent_request_timeout;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let operation = (|| {
+            let mut codex = CodexAppSession::fork(&source_thread_id, None, request_timeout)?;
+            runtime
+                .lock()
+                .map_err(|error| error.to_string())?
+                .update_session_runtime(source.id, source_original_state, None)
+                .map_err(|error| error.to_string())?;
+            let forked_thread_id = codex.thread_id.clone();
+            let display_name = format!("{task_id_for_worker} · {profile_id} 分支");
+            let (run, binding) = runtime
+                .lock()
+                .map_err(|error| error.to_string())?
+                .create_run_with_session(
+                    project.id,
+                    &task_id_for_worker,
+                    &profile_id,
+                    AgentProvider::Codex,
+                    NewSessionBinding {
+                        project_id: project.id,
+                        profile_id: &profile_id,
+                        provider: AgentProvider::Codex,
+                        external_session_id: &forked_thread_id,
+                        source: SessionBindingSource::Managed,
+                        verification: SessionVerification::Verified,
+                        display_name: Some(&display_name),
+                        working_directory: &project_path,
+                        state: SessionRuntimeState::Starting,
+                    },
+                    "starting",
+                )
+                .map_err(|error| error.to_string())?;
+            runtime
+                .lock()
+                .map_err(|error| error.to_string())?
+                .resolve_push(push.id, run.id, binding.id)
+                .map_err(|error| error.to_string())?;
+            let turn = codex.start_turn(&prompt)?;
+            {
+                let mut store = runtime.lock().map_err(|error| error.to_string())?;
+                store
+                    .update_session_runtime(
+                        binding.id,
+                        SessionRuntimeState::Running,
+                        Some(&turn.turn_id),
+                    )
+                    .map_err(|error| error.to_string())?;
+                store
+                    .finish_delivery(
+                        push.id,
+                        PushStatus::Delivered,
+                        Some(&turn.turn_id),
+                        None,
+                        false,
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            let started = attempts
+                .lock()
+                .map_err(|error| error.to_string())?
+                .update(
+                    attempt_id,
+                    PushAttemptStatus::Started,
+                    Some(turn.process_id),
+                    None,
+                    PushDelivery::Process,
+                )
+                .map_err(|error| error.to_string())?;
+            emit_or_log(&app_for_worker, PUSH_ATTEMPT_EVENT, &started);
+            let live_handle = codex.live_handle();
+            codex_sessions
+                .lock()
+                .map_err(|error| error.to_string())?
+                .insert(binding.id, live_handle.clone());
+            let runtime_for_monitor = runtime.clone();
+            let attempts_for_monitor = attempts.clone();
+            let app_for_monitor = app_for_worker.clone();
+            std::thread::spawn(move || {
+                monitor_codex_inbox(
+                    codex,
+                    binding.id,
+                    turn,
+                    attempt_id,
+                    CodexMonitorContext {
+                        runtime: runtime_for_monitor,
+                        attempts: attempts_for_monitor,
+                        codex_sessions,
+                        live_handle,
+                        app: app_for_monitor,
+                    },
+                );
+            });
+            Ok::<_, String>((started, binding))
+        })();
+        if let Err(error) = &operation {
+            if let Ok(mut store) = runtime.lock() {
+                let _ =
+                    store.finish_delivery(push.id, PushStatus::Failed, None, Some(error), false);
+                let _ = store.update_session_runtime(source.id, source_original_state, None);
+            }
+            if let Ok(mut store) = attempts.lock() {
+                let _ = store.update(
+                    attempt_id,
+                    PushAttemptStatus::FailedToStart,
+                    None,
+                    Some(error.clone()),
+                    PushDelivery::Process,
+                );
+            }
+        }
+        operation
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+
+    match result {
+        Ok((started, binding)) => Ok(PushOutcome {
+            attempt: started,
+            pointer_prompt,
+            message: "已创建 Codex Session 分支并接收任务".into(),
+            session: Some(binding),
+        }),
+        Err(error) => Ok(PushOutcome {
+            attempt,
+            pointer_prompt,
+            message: format!("创建 Session 分支失败：{error}"),
+            session: None,
         }),
     }
 }
@@ -741,10 +1287,12 @@ async fn push_new_codex_session(
 ) -> Result<PushOutcome, String> {
     let runtime = state.runtime.clone();
     let attempts = state.push_attempts.clone();
+    let codex_sessions = state.codex_sessions.clone();
     let prompt = pointer_prompt.text.clone();
     let app_for_worker = app.clone();
     let attempt_id = attempt.id;
     let profile_name_for_worker = profile_name.clone();
+    let request_timeout = state.config.agent_request_timeout;
     let result = tauri::async_runtime::spawn_blocking(move || {
         let push = {
             let mut store = runtime.lock().map_err(|error| error.to_string())?;
@@ -768,7 +1316,7 @@ async fn push_new_codex_session(
         };
 
         let operation = (|| {
-            let mut codex = CodexAppSession::create(&project_path)?;
+            let mut codex = CodexAppSession::create(&project_path, request_timeout)?;
             let thread_id = codex.thread_id.clone();
             let display_name = format!("{task_id} · {profile_name_for_worker}");
             let (run, binding) = runtime
@@ -832,6 +1380,11 @@ async fn push_new_codex_session(
                 )
                 .map_err(|error| error.to_string())?;
             emit_or_log(&app_for_worker, PUSH_ATTEMPT_EVENT, &started_attempt);
+            let live_handle = codex.live_handle();
+            codex_sessions
+                .lock()
+                .map_err(|error| error.to_string())?
+                .insert(binding.id, live_handle.clone());
 
             let runtime_for_monitor = runtime.clone();
             let attempts_for_monitor = attempts.clone();
@@ -843,9 +1396,13 @@ async fn push_new_codex_session(
                     binding_id,
                     started_turn,
                     attempt_id,
-                    runtime_for_monitor,
-                    attempts_for_monitor,
-                    app_for_monitor,
+                    CodexMonitorContext {
+                        runtime: runtime_for_monitor,
+                        attempts: attempts_for_monitor,
+                        codex_sessions,
+                        live_handle,
+                        app: app_for_monitor,
+                    },
                 );
             });
             Ok::<_, String>((started_attempt, binding))
@@ -908,15 +1465,29 @@ async fn push_new_codex_session(
     }
 }
 
+struct CodexMonitorContext {
+    runtime: std::sync::Arc<std::sync::Mutex<aurapilot_core::runtime_store::RuntimeStore>>,
+    attempts: std::sync::Arc<std::sync::Mutex<aurapilot_core::push_attempt::PushAttemptStore>>,
+    codex_sessions:
+        std::sync::Arc<std::sync::Mutex<std::collections::HashMap<Uuid, CodexLiveHandle>>>,
+    live_handle: CodexLiveHandle,
+    app: AppHandle,
+}
+
 fn monitor_codex_inbox(
     mut codex: CodexAppSession,
     session_id: Uuid,
     initial_turn: StartedTurn,
     initial_attempt_id: Uuid,
-    runtime: std::sync::Arc<std::sync::Mutex<aurapilot_core::runtime_store::RuntimeStore>>,
-    attempts: std::sync::Arc<std::sync::Mutex<aurapilot_core::push_attempt::PushAttemptStore>>,
-    app: AppHandle,
+    context: CodexMonitorContext,
 ) {
+    let CodexMonitorContext {
+        runtime,
+        attempts,
+        codex_sessions,
+        live_handle,
+        app,
+    } = context;
     let mut turn = initial_turn;
     let mut attempt_id = Some(initial_attempt_id);
     loop {
@@ -969,9 +1540,9 @@ fn monitor_codex_inbox(
                             );
                             break;
                         }
-                        push
+                        Some(push)
                     }
-                    Ok(None) => break,
+                    Ok(None) => None,
                     Err(error) => {
                         eprintln!("failed to claim queued Codex push: {error}");
                         break;
@@ -982,6 +1553,10 @@ fn monitor_codex_inbox(
                 eprintln!("runtime store lock poisoned while draining Codex inbox: {error}");
                 break;
             }
+        };
+        let Some(next) = next else {
+            codex.wait_for_pending_requests();
+            break;
         };
 
         attempt_id = Uuid::parse_str(&next.idempotency_key).ok();
@@ -1061,6 +1636,14 @@ fn monitor_codex_inbox(
                 }
                 break;
             }
+        }
+    }
+    if let Ok(mut sessions) = codex_sessions.lock() {
+        let is_current = sessions
+            .get(&session_id)
+            .is_some_and(|current| current.same_connection(&live_handle));
+        if is_current {
+            sessions.remove(&session_id);
         }
     }
 }

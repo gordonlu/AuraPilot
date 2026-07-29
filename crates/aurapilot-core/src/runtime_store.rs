@@ -28,6 +28,24 @@ impl AgentProvider {
         }
     }
 
+    pub fn from_profile_and_executable(profile_id: &str, executable: &str) -> Self {
+        let builtin = Self::from_profile(profile_id);
+        if builtin != Self::Other {
+            return builtin;
+        }
+        let executable = Path::new(executable)
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or(executable)
+            .to_ascii_lowercase();
+        match executable.as_str() {
+            "codex" => Self::Codex,
+            "claude" | "claude-code" => Self::ClaudeCode,
+            "opencode" => Self::OpenCode,
+            _ => Self::Other,
+        }
+    }
+
     fn as_str(self) -> &'static str {
         match self {
             Self::Codex => "codex",
@@ -1039,6 +1057,22 @@ mod tests {
                 .query_row("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
             2
+        );
+    }
+
+    #[test]
+    fn custom_profiles_infer_provider_from_their_executable_without_changing_profile_identity() {
+        assert_eq!(
+            AgentProvider::from_profile_and_executable("codex-review", "/usr/bin/codex"),
+            AgentProvider::Codex
+        );
+        assert_eq!(
+            AgentProvider::from_profile_and_executable("claude-fast", "claude"),
+            AgentProvider::ClaudeCode
+        );
+        assert_eq!(
+            AgentProvider::from_profile_and_executable("private-tool", "agent-wrapper"),
+            AgentProvider::Other
         );
     }
 
