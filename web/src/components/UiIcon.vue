@@ -64,6 +64,9 @@ defineProps<{ name: string; size?: number }>()
     <template v-else-if="name === 'terminal'">
       <rect x="3" y="5" width="18" height="14" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>
     </template>
+    <template v-else-if="name === 'archive'">
+      <path d="M4 7h16v13H4Z"/><path d="M3 4h18v3H3ZM9 11h6"/>
+    </template>
     <template v-else-if="name === 'git-branch'">
       <circle cx="6" cy="5" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 12h3a7 7 0 0 0 7-3"/>
     </template>

@@ -1,4 +1,5 @@
 import { isTauri } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { defineStore } from 'pinia'
 import { invokeBackend } from '../backend'
 import type {
@@ -7,7 +8,10 @@ import type {
   AgentSessionBinding,
   PointerPrompt,
   PushOutcome,
+  PushAttempt,
 } from '../types/protocol'
+
+export const PUSH_ATTEMPT_EVENT = 'aurapilot://push-attempt'
 
 const builtin = (
   id: string,
@@ -50,8 +54,24 @@ export const useAgentsStore = defineStore('agents', {
     loading: false,
     error: null as string | null,
     sessions: [] as AgentSessionBinding[],
+    runtimeError: null as string | null,
+    stopListening: null as UnlistenFn | null,
   }),
   actions: {
+    async startWatchingAttempts() {
+      if (!isTauri() || this.stopListening) return
+      this.stopListening = await listen<PushAttempt>(PUSH_ATTEMPT_EVENT, ({ payload }) => {
+        if (!payload.error) return
+        this.runtimeError = `${payload.task_id} · ${payload.agent_profile_id}：${payload.error}`
+      })
+    },
+    stopWatchingAttempts() {
+      this.stopListening?.()
+      this.stopListening = null
+    },
+    clearRuntimeError() {
+      this.runtimeError = null
+    },
     async load() {
       this.loading = true
       this.error = null

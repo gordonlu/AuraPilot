@@ -23,6 +23,15 @@ pub struct CoreConfig {
     pub max_profile_id_bytes: usize,
     pub sqlite_busy_timeout: Duration,
     pub agent_request_timeout: Duration,
+    pub agent_status_poll_interval: Duration,
+    pub agent_server_start_attempts: usize,
+    pub agent_error_body_limit_bytes: usize,
+    pub aura_package_max_bytes: usize,
+    pub aura_package_max_tasks: usize,
+    pub aura_password_max_bytes: usize,
+    pub aura_kdf_memory_kib: u32,
+    pub aura_kdf_iterations: u32,
+    pub aura_kdf_parallelism: u32,
 }
 
 impl Default for CoreConfig {
@@ -46,6 +55,15 @@ impl Default for CoreConfig {
             max_profile_id_bytes: 64,
             sqlite_busy_timeout: Duration::from_secs(3),
             agent_request_timeout: Duration::from_secs(15),
+            agent_status_poll_interval: Duration::from_millis(500),
+            agent_server_start_attempts: 3,
+            agent_error_body_limit_bytes: 4_096,
+            aura_package_max_bytes: 64 * 1024 * 1024,
+            aura_package_max_tasks: 10_000,
+            aura_password_max_bytes: 1_024,
+            aura_kdf_memory_kib: 64 * 1024,
+            aura_kdf_iterations: 3,
+            aura_kdf_parallelism: 1,
         }
     }
 }
@@ -73,5 +91,17 @@ mod tests {
         assert_eq!(config.max_profile_id_bytes, 64);
         assert_eq!(config.sqlite_busy_timeout, Duration::from_secs(3));
         assert_eq!(config.agent_request_timeout, Duration::from_secs(15));
+        assert_eq!(
+            config.agent_status_poll_interval,
+            Duration::from_millis(500)
+        );
+        assert_eq!(config.agent_server_start_attempts, 3);
+        assert_eq!(config.agent_error_body_limit_bytes, 4_096);
+        assert_eq!(config.aura_package_max_bytes, 64 * 1024 * 1024);
+        assert_eq!(config.aura_package_max_tasks, 10_000);
+        assert_eq!(config.aura_password_max_bytes, 1_024);
+        assert_eq!(config.aura_kdf_memory_kib, 64 * 1024);
+        assert_eq!(config.aura_kdf_iterations, 3);
+        assert_eq!(config.aura_kdf_parallelism, 1);
     }
 }

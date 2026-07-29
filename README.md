@@ -32,10 +32,28 @@ aurapilot status
 
 Continue with the [installation guide](docs/INSTALLATION.md) and the one-time [Agent Bootstrap guide](docs/BOOTSTRAP.md).
 
+## Portable task packages
+
+Use `.aura` packages to move task records that you do not want to send through Git. Import always starts with a version, integrity, schema, path-safety, and conflict preview; applying the import requires the SHA-256 printed by that preview. Existing task files are never overwritten.
+
+```sh
+# Export all tasks as an ordinary, unencrypted package.
+aurapilot task export /path/to/source --output tasks.aura
+
+# Optional encryption reads the password from a file, not a command-line argument.
+aurapilot task export /path/to/source --output private.aura --password-file /path/to/password.txt
+
+# Preview first, then repeat with the printed digest.
+aurapilot task import /path/to/destination tasks.aura
+aurapilot task import /path/to/destination tasks.aura --apply <preview-sha256>
+```
+
+Ordinary packages are compressed but **not encrypted**. Password-protected packages use authenticated encryption and require the same password file for preview and import. The desktop app exposes the same flow under **任务包**.
+
 ## Workspace
 
 - `crates/aurapilot-core`: protocol models, validation, path safety, locking, task IDs, and file transactions.
-- `crates/aurapilot-cli`: repository initialization, registration, status, and atomic backlog task creation.
+- `crates/aurapilot-cli`: repository initialization, registration, status, task creation, and portable task transfer.
 - `src-tauri`: Tauri 2 desktop shell. Its development identifier is not part of the AuraPilot protocol.
 - `web`: Vue 3 + Vite + TypeScript + Pinia frontend, tested with Vitest.
 - `prototype`: preserved legacy HTML/CSS/JavaScript interaction prototype. It is reference-only; production frontend code lives in `web/src`.

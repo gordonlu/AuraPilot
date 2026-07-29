@@ -1,5 +1,6 @@
 pub mod agent_profile;
 pub mod app_paths;
+pub mod aura_package;
 pub mod config;
 pub mod diagnostic;
 pub mod initializer;

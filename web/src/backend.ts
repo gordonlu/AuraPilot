@@ -1,6 +1,9 @@
 import { invoke } from '@tauri-apps/api/core'
 
-export const BACKEND_OPERATION_TIMEOUT_MS = 15_000
+// CoreConfig caps provider startup at 15 seconds. This leaves enough time for
+// the backend to persist and return the actionable failure instead of racing it.
+export const BACKEND_OPERATION_TIMEOUT_MS = 20_000
+export const LONG_BACKEND_OPERATION_TIMEOUT_MS = 120_000
 
 export class BackendTimeoutError extends Error {
   constructor(command: string) {
@@ -28,3 +31,18 @@ export const withBackendTimeout = async <T>(operation: Promise<T>, command: stri
 
 export const invokeBackend = <T>(command: string, args?: Record<string, unknown>) =>
   withBackendTimeout(invoke<T>(command, args), command)
+
+export const invokeLongBackend = <T>(command: string, args?: Record<string, unknown>) => {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    invoke<T>(command, args),
+    new Promise<never>((_, reject) => {
+      timeout = setTimeout(
+        () => reject(new BackendTimeoutError(command)),
+        LONG_BACKEND_OPERATION_TIMEOUT_MS,
+      )
+    }),
+  ]).finally(() => {
+    if (timeout) clearTimeout(timeout)
+  })
+}

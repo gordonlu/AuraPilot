@@ -165,8 +165,8 @@ const controlLiveTurn = async (action: 'steer' | 'interrupt') => {
         </template>
 
         <section v-if="preview" class="prompt-preview"><div><strong>Pointer Prompt</strong><span>{{ preview.text.length }} 字符</span></div><pre>{{ preview.text }}</pre></section>
-        <p v-if="outcome" :class="['push-result', outcome.attempt.status === 'failed_to_start' ? 'warning' : 'success']">{{ outcome.message }}</p>
-        <p v-if="error || agents.error" class="form-error">{{ error || agents.error }}</p>
+        <p v-if="outcome" :class="['push-result', outcome.attempt.status === 'failed_to_start' ? 'warning' : 'success']" role="status" aria-live="polite">{{ outcome.message }}</p>
+        <p v-if="error || agents.error" class="form-error" role="alert" aria-live="assertive">{{ error || agents.error }}</p>
       </div>
       <footer><span class="push-safety">Push 不会领取任务或修改任务状态</span><button class="button secondary" @click="$emit('close')">关闭</button><button class="button primary" :disabled="busy || !canSubmit" @click="push"><UiIcon name="send" :size="15"/>{{ primaryLabel }}</button></footer>
     </section>

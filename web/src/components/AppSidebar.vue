@@ -30,6 +30,7 @@ defineEmits<{
   theme: []
   diagnostics: []
   profiles: []
+  transfer: []
 }>()
 </script>
 
@@ -73,6 +74,9 @@ defineEmits<{
     </nav>
 
     <div class="sidebar-footer">
+      <button class="footer-control" @click="$emit('transfer')">
+        <UiIcon name="archive"/><span>任务包</span>
+      </button>
       <button class="footer-control" @click="$emit('profiles')">
         <UiIcon name="terminal"/><span>Agent Profiles</span>
       </button>

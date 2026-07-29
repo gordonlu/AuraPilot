@@ -11,6 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 aurapilot-core = { path = "../aurapilot-core" }
+uuid.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 serde_yaml.workspace = true

@@ -1,11 +1,14 @@
 import { isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import { defineStore } from 'pinia'
-import { invokeBackend, withBackendTimeout } from '../backend'
+import { invokeBackend, invokeLongBackend, withBackendTimeout } from '../backend'
 import { demoSnapshots } from '../demo'
 import type {
   LocatedTask,
+  AuraExportReport,
+  AuraImportPreview,
+  AuraImportReport,
   ProjectChange,
   ProjectSnapshot,
   RegisteredProject,
@@ -106,6 +109,52 @@ export const useProjectsStore = defineStore('projects', {
         title: '选择要接入 AuraPilot 的代码仓库',
       })
       return typeof selected === 'string' ? selected : null
+    },
+    async chooseAuraExportPath(defaultName: string) {
+      if (!isTauri()) throw new Error('导出仅在桌面应用中可用')
+      return save({
+        title: '导出 AuraPilot 任务包',
+        defaultPath: defaultName,
+        filters: [{ name: 'AuraPilot 任务包', extensions: ['aura'] }],
+      })
+    },
+    async chooseAuraPackage() {
+      if (!isTauri()) throw new Error('导入仅在桌面应用中可用')
+      const selected = await open({
+        title: '选择 AuraPilot 任务包',
+        directory: false,
+        multiple: false,
+        filters: [{ name: 'AuraPilot 任务包', extensions: ['aura'] }],
+      })
+      return typeof selected === 'string' ? selected : null
+    },
+    async exportAura(projectId: string, taskIds: string[], output: string, password: string | null) {
+      if (!isTauri()) throw new Error('导出仅在桌面应用中可用')
+      return invokeLongBackend<AuraExportReport>('export_aura_tasks', {
+        projectId, taskIds, output, password,
+      })
+    },
+    async previewAuraImport(projectId: string, packagePath: string, password: string | null) {
+      if (!isTauri()) throw new Error('导入仅在桌面应用中可用')
+      return invokeLongBackend<AuraImportPreview>('preview_aura_import', {
+        projectId, package: packagePath, password,
+      })
+    },
+    async importAura(
+      projectId: string,
+      packagePath: string,
+      password: string | null,
+      expectedPackageSha256: string,
+    ) {
+      if (!isTauri()) throw new Error('导入仅在桌面应用中可用')
+      const report = await invokeLongBackend<AuraImportReport>('import_aura_tasks', {
+        projectId,
+        package: packagePath,
+        password,
+        expectedPackageSha256,
+      })
+      await this.refresh(projectId)
+      return report
     },
     async create(projectId: string, input: TaskDraft) {
       if (!isTauri()) {

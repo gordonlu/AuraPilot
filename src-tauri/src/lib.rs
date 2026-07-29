@@ -5,11 +5,13 @@ mod state;
 
 use commands::{
     add_project, bind_agent_session, create_task, delete_agent_profile, delete_task,
-    fork_task_session, initialize_project, interrupt_task_session, list_agent_profiles,
-    list_agent_sessions, list_projects, list_push_attempts, preview_pointer_prompt, push_task,
+    export_aura_tasks, fork_task_session, import_aura_tasks, initialize_project,
+    interrupt_task_session, list_agent_profiles, list_agent_sessions, list_projects,
+    list_push_attempts, preview_aura_import, preview_pointer_prompt, push_task,
     push_task_to_session, remove_project, save_agent_profile, scan_project, scan_projects,
     steer_task_session, test_agent_profile, transition_task, update_task,
 };
+use commands::{recover_claude_inboxes, recover_codex_inboxes, recover_opencode_inboxes};
 use state::AppState;
 use tauri::{Emitter, Manager};
 
@@ -29,6 +31,24 @@ pub fn run() {
                 }
             })?;
             app.manage(state);
+            let recovered =
+                recover_codex_inboxes(app.handle().clone(), app.state::<AppState>().inner())
+                    .map_err(std::io::Error::other)?;
+            if recovered > 0 {
+                eprintln!("started recovery for {recovered} Codex Session inboxes");
+            }
+            let recovered =
+                recover_claude_inboxes(app.handle().clone(), app.state::<AppState>().inner())
+                    .map_err(std::io::Error::other)?;
+            if recovered > 0 {
+                eprintln!("started recovery for {recovered} Claude Session inboxes");
+            }
+            let recovered =
+                recover_opencode_inboxes(app.handle().clone(), app.state::<AppState>().inner())
+                    .map_err(std::io::Error::other)?;
+            if recovered > 0 {
+                eprintln!("started recovery for {recovered} OpenCode Session inboxes");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -42,6 +62,9 @@ pub fn run() {
             update_task,
             transition_task,
             delete_task,
+            export_aura_tasks,
+            preview_aura_import,
+            import_aura_tasks,
             list_agent_profiles,
             save_agent_profile,
             delete_agent_profile,

@@ -73,6 +73,33 @@ export interface ProjectChange {
   paths: string[]
 }
 
+export interface AuraExportReport {
+  output: string
+  encrypted: boolean
+  task_count: number
+  package_sha256: string
+}
+
+export interface AuraImportItem {
+  task_id: string
+  state: TaskState
+  relative_path: string
+  conflict: boolean
+}
+
+export interface AuraImportPreview {
+  format_version: number
+  encrypted: boolean
+  package_sha256: string
+  items: AuraImportItem[]
+  has_conflicts: boolean
+}
+
+export interface AuraImportReport {
+  imported: string[]
+  package_sha256: string
+}
+
 export interface TaskDraft {
   title: string
   priority: string

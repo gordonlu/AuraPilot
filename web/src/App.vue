@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import AddProjectModal from './components/AddProjectModal.vue'
 import AgentProfilesModal from './components/AgentProfilesModal.vue'
+import AuraTransferModal from './components/AuraTransferModal.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import BlockedView from './components/BlockedView.vue'
 import BoardView from './components/BoardView.vue'
@@ -13,16 +14,18 @@ import TaskFormModal from './components/TaskFormModal.vue'
 import PushTaskModal from './components/PushTaskModal.vue'
 import UiIcon from './components/UiIcon.vue'
 import { useProjectsStore } from './stores/projects'
+import { useAgentsStore } from './stores/agents'
 import { nextTheme, resolveTheme, type Theme } from './theme'
 import type { LocatedTask, TaskDraft, TaskTransition } from './types/protocol'
 
 const projectsStore = useProjectsStore()
+const agentsStore = useAgentsStore()
 const activeProject = ref('all')
 const activeView = ref<'board' | 'blocked'>('board')
 const search = ref('')
 const theme = ref<Theme>(resolveTheme(localStorage.getItem('aurapilot-theme')))
 const selected = ref<{ projectId: string; taskId: string } | null>(null)
-const modal = ref<'create' | 'edit' | 'add-project' | 'delete' | 'push' | 'profiles' | null>(null)
+const modal = ref<'create' | 'edit' | 'add-project' | 'delete' | 'push' | 'profiles' | 'transfer' | null>(null)
 const showDiagnostics = ref(false)
 const busy = ref(false)
 const actionError = ref<string | null>(null)
@@ -124,9 +127,9 @@ const retryProjectSync = async () => {
   await projectsStore.load()
 }
 const onKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') { closeOverlays(); return }
   const target = event.target as HTMLElement
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
-  if (event.key === 'Escape') closeOverlays()
   if (event.key.toLowerCase() === 'n' && allSnapshots.value.length) modal.value = 'create'
   if (event.key.toLowerCase() === 'b') activeView.value = activeView.value === 'board' ? 'blocked' : 'board'
   if (event.key === '/') { event.preventDefault(); document.querySelector<HTMLInputElement>('#task-search')?.focus() }
@@ -134,6 +137,7 @@ const onKeydown = (event: KeyboardEvent) => {
 
 onMounted(async () => {
   document.documentElement.dataset.theme = theme.value
+  await agentsStore.startWatchingAttempts()
   await projectsStore.load()
   await projectsStore.startWatching()
   if (import.meta.env.DEV) {
@@ -150,10 +154,17 @@ onMounted(async () => {
       if (project) selected.value = { projectId: project.registration.id, taskId }
     }
     if (preview.get('modal') === 'create' && allSnapshots.value.length) modal.value = 'create'
+    if (preview.get('modal') === 'transfer' && allSnapshots.value.length) modal.value = 'transfer'
+    const agentError = preview.get('agentError')
+    if (agentError) agentsStore.runtimeError = agentError
   }
   window.addEventListener('keydown', onKeydown)
 })
-onBeforeUnmount(() => { projectsStore.stopWatching(); window.removeEventListener('keydown', onKeydown) })
+onBeforeUnmount(() => {
+  projectsStore.stopWatching()
+  agentsStore.stopWatchingAttempts()
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <template>
@@ -163,6 +174,7 @@ onBeforeUnmount(() => { projectsStore.stopWatching(); window.removeEventListener
       :theme="theme" :diagnostic-count="diagnosticCount"
       @project="activeProject = $event" @view="activeView = $event" @add="openAddProject"
       @theme="toggleTheme" @diagnostics="showDiagnostics = !showDiagnostics" @profiles="modal = 'profiles'"
+      @transfer="modal = 'transfer'"
     />
     <main class="workspace">
       <header class="app-toolbar">
@@ -176,6 +188,11 @@ onBeforeUnmount(() => { projectsStore.stopWatching(); window.removeEventListener
         <UiIcon name="alert" :size="15"/>
         <span>{{ projectsStore.error }}</span>
         <button @click="retryProjectSync">重新扫描</button>
+      </div>
+      <div v-if="agentsStore.runtimeError" class="runtime-error" role="alert">
+        <UiIcon name="alert" :size="15"/>
+        <span>Agent 操作失败：{{ agentsStore.runtimeError }}</span>
+        <button @click="agentsStore.clearRuntimeError">知道了</button>
       </div>
 
       <div class="main-surface">
@@ -208,6 +225,10 @@ onBeforeUnmount(() => { projectsStore.stopWatching(); window.removeEventListener
     />
     <PushTaskModal v-if="modal === 'push' && selectedTask && selectedProject" :task="selectedTask" :project="selectedProject" @close="modal = null" />
     <AgentProfilesModal v-if="modal === 'profiles'" :projects="allSnapshots" @close="modal = null" />
+    <AuraTransferModal
+      v-if="modal === 'transfer'" :projects="allSnapshots"
+      :initial-project-id="activeProject" @close="modal = null"
+    />
     <ConfirmDialog
       v-if="modal === 'delete' && selectedTask" title="删除任务？"
       :message="`${selectedTask.document.id} 将从 .aurapilot 中永久删除。项目内其他文件不会受影响。`"

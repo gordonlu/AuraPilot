@@ -487,6 +487,26 @@ impl RuntimeStore {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    pub fn sessions_with_queued_pushes(
+        &self,
+        provider: AgentProvider,
+    ) -> Result<Vec<SessionBinding>, RuntimeStoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT DISTINCT
+                    s.id, s.project_id, s.profile_id, s.provider, s.external_session_id,
+                    s.binding_source, s.verification_status, s.display_name,
+                    s.working_directory, s.state, s.active_turn_id, s.hidden,
+                    s.created_at, s.updated_at, s.last_used_at
+             FROM session_bindings s
+             JOIN push_requests p
+               ON COALESCE(p.resolved_session_id, p.target_session_id) = s.id
+             WHERE p.status = 'queued' AND s.provider = ?1 AND s.hidden = 0
+             ORDER BY s.last_used_at ASC",
+        )?;
+        let rows = statement.query_map([provider.as_str()], map_session)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     pub fn session(&self, id: Uuid) -> Result<Option<SessionBinding>, RuntimeStoreError> {
         self.connection
             .query_row(
@@ -1239,6 +1259,12 @@ mod tests {
         };
         let first = enqueue("TASK-001", "fifo-1");
         let second = enqueue("TASK-002", "fifo-2");
+        assert_eq!(
+            store
+                .sessions_with_queued_pushes(AgentProvider::Codex)
+                .unwrap(),
+            std::slice::from_ref(&session)
+        );
 
         assert_eq!(
             store
@@ -1263,6 +1289,12 @@ mod tests {
             .finish_delivery(second.id, PushStatus::Delivered, None, None, false)
             .unwrap();
         assert!(store.claim_next_queued_push(session.id).unwrap().is_none());
+        assert!(
+            store
+                .sessions_with_queued_pushes(AgentProvider::Codex)
+                .unwrap()
+                .is_empty()
+        );
         assert!(matches!(
             store.begin_delivery(first.id),
             Err(RuntimeStoreError::PushNotQueued(id)) if id == first.id

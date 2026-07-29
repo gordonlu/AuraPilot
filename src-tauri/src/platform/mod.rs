@@ -73,7 +73,7 @@ fn launch_headless(prepared: &PreparedLaunch, executable: &Path) -> io::Result<C
     Ok(child)
 }
 
-fn resolve_command(command: &str) -> Option<PathBuf> {
+pub(crate) fn resolve_command(command: &str) -> Option<PathBuf> {
     let candidate = Path::new(command);
     if candidate.components().count() > 1 {
         return candidate.is_file().then(|| candidate.to_path_buf());
