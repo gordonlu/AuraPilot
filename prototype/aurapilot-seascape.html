@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AuraPilot — 任务航海图</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Noto+Serif+SC:wght@500;600&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #1c1917;
+  --ink-soft: #57504a;
+  --ink-mute: #8d8378;
+  --paper: #fffdf8;
+  --hairline: rgba(28,25,23,.09);
+  --hairline-strong: rgba(28,25,23,.16);
+
+  --ginger: #d97742;
+  --ginger-deep: #b85c2c;
+  --teal: #4f8a8a;
+  --teal-deep: #33686c;
+  --sage: #6f9264;
+  --brick: #c2503c;
+  --sand-dark: #c9b globalize892;
+
+  --serif: 'Noto Serif SC', 'Fraunces', serif;
+  --sans: 'DM Sans', -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+
+  --sh-1: 0 1px 2px rgba(28,25,23,.05), 0 2px 6px rgba(28,25,23,.04);
+  --sh-2: 0 3px 8px rgba(28,25,23,.07), 0 10px 24px rgba(28,25,23,.07);
+  --sh-3: 0 6px 16px rgba(28,25,23,.1), 0 16px 40px rgba(28,25,23,.1);
+
+  --ease: cubic-bezier(.32,.72,.35,1);
+  --spring: cubic-bezier(.3,1.35,.45,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: #f2ecdd;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--ginger); outline-offset: 2px; border-radius: 4px; }
+
+.app {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  grid-template-rows: 52px 1fr 30px;
+  grid-template-areas: "rail head" "rail board" "rail status";
+  height: 100vh;
+}
+
+/* ── rail ── */
+.rail {
+  grid-area: rail;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 14px 0; gap: 4px;
+  background: #f2ecdd;
+  border-right: 1px solid var(--hairline);
+}
+.rail .mark {
+  width: 34px; height: 34px; display: grid; place-items: center;
+  font-family: var(--serif); font-size: 19px; font-weight: 600;
+  color: var(--ginger-deep); margin-bottom: 14px;
+}
+.rail-btn {
+  width: 38px; height: 38px; display: grid; place-items: center;
+  border-radius: 10px; color: var(--ink-mute);
+  transition: all .18s var(--ease); position: relative;
+}
+.rail-btn:hover { color: var(--ink); background: rgba(28,25,23,.05); }
+.rail-btn.active { color: var(--ginger-deep); background: rgba(217,119,66,.13); }
+.rail-btn.active::before {
+  content: ''; position: absolute; left: -11px;
+  width: 3px; height: 18px; border-radius: 2px; background: var(--ginger);
+}
+.rail-btn svg { width: 17px; height: 17px; }
+.rail .spacer { flex: 1; }
+.rail .badge-dot {
+  position: absolute; top: 7px; right: 7px;
+  width: 7px; height: 7px; border-radius: 50%; background: var(--brick);
+}
+
+/* ── header ── */
+.head {
+  grid-area: head;
+  display: flex; align-items: center; gap: 18px;
+  padding: 0 22px;
+  background: #f2ecdd;
+  border-bottom: 1px solid var(--hairline);
+}
+.head h1 { font-family: var(--serif); font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+.head h1 em { font-style: normal; color: var(--ink-mute); font-size: 11px; font-family: var(--mono); font-weight: 400; }
+.gulls { color: var(--ink-mute); opacity: .5; }
+.search {
+  display: flex; align-items: center; gap: 8px;
+  height: 32px; width: 290px; padding: 0 12px;
+  border: 1px solid var(--hairline); border-radius: 8px;
+  background: var(--paper); color: var(--ink-mute);
+  transition: all .18s var(--ease);
+}
+.search:focus-within { border-color: var(--ginger); box-shadow: 0 0 0 3px rgba(217,119,66,.12); }
+.search input { flex: 1; border: 0; outline: 0; background: none; font-size: 12px; color: var(--ink); }
+.search input::placeholder { color: var(--ink-mute); }
+.search kbd {
+  font-family: var(--mono); font-size: 10px; padding: 1px 5px;
+  border: 1px solid var(--hairline); border-radius: 4px; color: var(--ink-mute);
+}
+.head-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.seg {
+  display: flex; gap: 2px; padding: 2px;
+  border: 1px solid var(--hairline); border-radius: 8px; background: rgba(28,25,23,.05);
+}
+.seg button {
+  height: 26px; padding: 0 12px; border-radius: 6px;
+  font-size: 12px; font-weight: 500; color: var(--ink-soft);
+  transition: all .18s var(--ease);
+}
+.seg button.active { background: var(--paper); color: var(--ink); box-shadow: var(--sh-1); }
+.btn-new {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 14px; border-radius: 8px;
+  background: var(--ink); color: #fff; font-size: 12px; font-weight: 500;
+  transition: all .18s var(--ease);
+}
+.btn-new:hover { background: #000; transform: translateY(-1px); box-shadow: var(--sh-2); }
+
+/* ═══════════════════════════════════════
+   THE SEASCAPE — one continuous landscape
+   sand → shore → shallow → deep sea
+   ═══════════════════════════════════════ */
+.board {
+  grid-area: board;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(245px, 1fr));
+  min-width: 0;
+  overflow: hidden;
+  background: linear-gradient(100deg,
+    #f3ecda 0%,
+    #eee4cc 24%,
+    #e2dcc4 42%,
+    #c5d8cb 56%,
+    #9ec9c1 72%,
+    #6faeA9 87%,
+    #58979 8 100%);
+  background: linear-gradient(100deg,
+    #f3ecda 0%,
+    #eee4cc 24%,
+    #e2dcc4 42%,
+    #c5d8cb 56%,
+    #9ec9c1 72%,
+    #6faea9 87%,
+    #589798 100%);
+}
+
+/* sand grain on the beach side */
+.board::before {
+  content: '';
+  position: absolute; inset: 0;
+  width: 46%;
+  background-image:
+    radial-gradient(circle at 22% 30%, rgba(180,160,125,.22) 1px, transparent 1.5px),
+    radial-gradient(circle at 68% 64%, rgba(180,160,125,.16) 1px, transparent 1.5px),
+    radial-gradient(circle at 45% 82%, rgba(180,160,125,.19) 1px, transparent 1.5px);
+  background-size: 26px 26px, 34px 34px, 22px 22px;
+  pointer-events: none;
+}
+
+/* water ripple on the sea side */
+.board::after {
+  content: '';
+  position: absolute; top: 0; bottom: 0; right: 0;
+  width: 46%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='20' viewBox='0 0 72 20'%3E%3Cpath d='M0 10 Q 9 5 18 10 T 36 10 T 54 10 T 72 10' stroke='rgba(255,255,255,.28)' stroke-width='1.3' fill='none'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-position: 0 20px;
+  opacity: .55;
+  pointer-events: none;
+}
+
+/* the shoreline — hand-drawn foam line where sea meets sand */
+.shoreline {
+  position: absolute;
+  left: 50%;
+  top: 0; bottom: 0;
+  width: 80px;
+  transform: translateX(-50%);
+  z-index: 1;
+  pointer-events: none;
+  animation: shore-sway 7s ease-in-out infinite;
+}
+@keyframes shore-sway {
+  0%, 100% { transform: translateX(-50%); }
+  50% { transform: translateX(calc(-50% + 5px)); }
+}
+
+/* ── columns = terrains ── */
+.col {
+  position: relative;
+  z-index: 2;
+  display: flex; flex-direction: column;
+  min-width: 0;
+  padding: 18px 14px 14px;
+}
+.col-head {
+  display: flex; align-items: center; gap: 9px;
+  padding: 2px 6px 4px;
+  position: relative;
+}
+.col-head .ico { color: var(--ink-soft); flex: none; }
+.col[data-status="review"] .col-head .ico,
+.col[data-status="done"] .col-head .ico { color: rgba(255,255,255,.85); }
+.col-head h2 { font-family: var(--serif); font-size: 15.5px; font-weight: 600; letter-spacing: .02em; }
+.col-head .en { font-family: var(--mono); font-size: 9.5px; color: var(--ink-mute); letter-spacing: .05em; }
+.col[data-status="review"] .col-head .en,
+.col[data-status="done"] .col-head .en { color: rgba(255,255,255,.6); }
+.col-head .n { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--ink-soft); }
+.col[data-status="review"] .col-head .n,
+.col[data-status="done"] .col-head .n { color: rgba(255,255,255,.8); }
+.col[data-status="review"] .col-head,
+.col[data-status="done"] .col-head { text-shadow: 0 1px 0 rgba(255,255,255,.15); }
+
+/* hand-drawn wave underline */
+.col-head .u-wave {
+  position: absolute;
+  left: 4px; bottom: -4px;
+  width: 76px; height: 6px;
+  color: rgba(28,25,23,.3);
+}
+.col[data-status="progress"] .u-wave { color: rgba(184,92,44,.5); }
+.col[data-status="review"] .u-wave { color: rgba(255,255,255,.5); }
+.col[data-status="done"] .u-wave { color: rgba(255,255,255,.4); }
+
+.cards {
+  display: flex; flex-direction: column; gap: 13px;
+  overflow-y: auto; flex: 1;
+  padding: 14px 4px 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(28,25,23,.18) transparent;
+}
+.col[data-status="backlog"] .cards { padding-bottom: 128px; }
+
+/* ═══════════════════════════════════════
+   CARDS — pinned objects, every one different
+   ═══════════════════════════════════════ */
+.card {
+  position: relative;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  padding: 12px 13px;
+  text-align: left;
+  box-shadow: var(--sh-1);
+  display: flex; flex-direction: column; gap: 8px;
+  transition: transform .28s var(--spring), box-shadow .28s var(--ease), border-color .2s var(--ease);
+}
+/* every card pinned at its own angle + slightly different cut */
+.cards .card:nth-child(4n+1) { transform: rotate(-1.1deg); border-radius: 14px 11px 13px 10px; }
+.cards .card:nth-child(4n+2) { transform: rotate(.9deg);  border-radius: 11px 14px 10px 13px; }
+.cards .card:nth-child(4n+3) { transform: rotate(-.7deg); border-radius: 13px 10px 14px 11px; }
+.cards .card:nth-child(4n+4) { transform: rotate(1.2deg);  border-radius: 10px 13px 11px 14px; }
+.card:hover {
+  transform: rotate(0deg) translateY(-3px) scale(1.015);
+  box-shadow: var(--sh-3);
+  border-color: var(--hairline-strong);
+  z-index: 5;
+}
+.card.selected { border-color: var(--ginger); box-shadow: 0 0 0 1px var(--ginger), var(--sh-2); }
+
+/* washi tape */
+.tape {
+  position: absolute;
+  top: -9px; left: 50%;
+  width: 74px; height: 17px;
+  transform: translateX(-50%) rotate(-2.5deg);
+  background:
+    repeating-linear-gradient(115deg, rgba(255,255,255,.22) 0 4px, transparent 4px 8px),
+    rgba(217,119,66,.38);
+  border-left: 1px dashed rgba(255,255,255,.55);
+  border-right: 1px dashed rgba(255,255,255,.55);
+  box-shadow: 0 1px 3px rgba(28,25,23,.1);
+  border-radius: 1px;
+  pointer-events: none;
+}
+.tape.t2 {
+  transform: translateX(-50%) rotate(2deg);
+  background:
+    repeating-linear-gradient(115deg, rgba(255,255,255,.22) 0 4px, transparent 4px 8px),
+    rgba(79,138,138,.4);
+}
+.tape.t3 {
+  transform: translateX(-50%) rotate(-1.2deg);
+  width: 58px;
+  background:
+    repeating-linear-gradient(115deg, rgba(255,255,255,.22) 0 4px, transparent 4px 8px),
+    rgba(163,148,90,.42);
+}
+
+/* dog-eared corner */
+.dogear { overflow: hidden; }
+.dogear::before {
+  content: '';
+  position: absolute; top: 0; right: 0;
+  width: 0; height: 0;
+  border-top: 17px solid #ece3d0;
+  border-left: 17px solid transparent;
+  border-radius: 0 0 0 4px;
+  filter: drop-shadow(-1.5px 1.5px 1px rgba(28,25,23,.12));
+}
+.dogear::after {
+  content: '';
+  position: absolute; top: 0; right: 0;
+  width: 0; height: 0;
+  border-top: 17px solid transparent;
+  border-left: 17px solid rgba(28,25,23,.05);
+}
+
+/* push pin on blocked card */
+.pin {
+  position: absolute;
+  top: -8px; left: 22px;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, #e88a7a, var(--brick) 65%, #8f2f1f);
+  box-shadow: 0 2.5px 4px rgba(28,25,23,.3), inset 0 -1.5px 2px rgba(0,0,0,.25);
+  z-index: 3;
+}
+.pin::after {
+  content: '';
+  position: absolute; left: 50%; top: 100%;
+  width: 2px; height: 5px;
+  transform: translateX(-50%);
+  background: linear-gradient(#999, #666);
+  border-radius: 1px;
+}
+
+/* rubber stamp on done cards */
+.stamp {
+  position: absolute;
+  top: 9px; right: 10px;
+  transform: rotate(-8deg);
+  font-family: var(--serif);
+  font-size: 10.5px; font-weight: 600;
+  letter-spacing: .18em;
+  color: rgba(111,146,100,.85);
+  border: 1.6px solid rgba(111,146,100,.65);
+  outline: 1px solid rgba(111,146,100,.3);
+  outline-offset: 2px;
+  border-radius: 4px;
+  padding: 2px 7px 2px 9px;
+  pointer-events: none;
+}
+.col[data-status="done"] .card { opacity: .82; }
+.col[data-status="done"] .card:hover { opacity: 1; }
+
+/* sea-glass cards in review column */
+.col[data-status="review"] .card {
+  background: rgba(255,253,248,.78);
+  backdrop-filter: blur(3px);
+}
+
+/* card contents */
+.row-top { display: flex; align-items: center; gap: 8px; }
+.tid { font-family: var(--mono); font-size: 10px; color: var(--ink-mute); letter-spacing: .02em; }
+
+/* wax-seal priority */
+.pri {
+  width: 21px; height: 21px;
+  display: grid; place-items: center;
+  font-family: var(--mono); font-size: 8.5px; font-weight: 600;
+  color: #fff;
+  border-radius: 46% 54% 51% 49% / 52% 48% 53% 47%;
+  box-shadow: inset 0 -2px 3px rgba(0,0,0,.22), inset 0 1.5px 2px rgba(255,255,255,.3), 0 1.5px 3px rgba(28,25,23,.18);
+  flex: none;
+}
+.pri.p0 { background: radial-gradient(circle at 34% 28%, #d9756a, var(--brick) 62%, #93351f); }
+.pri.p1 { background: radial-gradient(circle at 34% 28%, #e89a6a, var(--ginger) 62%, #9e4e1e); }
+.pri.p2 { background: radial-gradient(circle at 34% 28%, #6ba8a4, var(--teal) 62%, #2c5e60); }
+.pri.p3 { background: radial-gradient(circle at 34% 28%, #a89f92, #857c6f 62%, #5f574c); }
+
+.kind { margin-left: auto; font-size: 10px; color: var(--ink-mute); }
+
+.card h3 {
+  font-size: 13px; font-weight: 600; line-height: 1.45; letter-spacing: -.004em;
+  background-image: linear-gradient(currentColor, currentColor);
+  background-repeat: no-repeat;
+  background-size: 0% 1px;
+  background-position: 0 100%;
+  transition: background-size .3s var(--ease);
+  width: fit-content;
+}
+.card:hover h3 { background-size: 100% 1px; }
+
+.meta { display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: var(--ink-mute); }
+.chip {
+  padding: 2px 7px; border-radius: 5px;
+  background: rgba(28,25,23,.055);
+  border: 1px dashed rgba(28,25,23,.12);
+  font-weight: 500; color: var(--ink-soft);
+}
+.branch { font-family: var(--mono); font-size: 9.5px; }
+
+.prog { display: flex; align-items: center; gap: 8px; }
+.prog .track {
+  flex: 1; height: 4px;
+  border-radius: 3px;
+  background: rgba(28,25,23,.08);
+  overflow: hidden;
+}
+.prog .fill {
+  height: 100%;
+  border-radius: 3px 7px 7px 3px / 3px 5px 5px 3px;
+  background: var(--ginger);
+  transition: width .4s var(--ease);
+}
+.col[data-status="review"] .prog .fill { background: var(--teal); }
+.col[data-status="done"] .prog .fill { background: var(--sage); }
+.prog .val { font-family: var(--mono); font-size: 9.5px; color: var(--ink-mute); }
+
+.foot {
+  display: flex; align-items: center; gap: 7px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--hairline);
+}
+.avatar {
+  width: 18px; height: 18px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 9px; font-weight: 600; color: #fff;
+}
+.foot .sub { font-size: 10px; color: var(--ink-mute); }
+.foot .time { margin-left: auto; font-family: var(--mono); font-size: 9.5px; color: var(--ink-mute); }
+
+/* sticky note for blocker */
+.blocker-note {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: #86661f;
+  background: linear-gradient(180deg, #fdf3cd, #f9ecc0);
+  border: 1px solid rgba(190,168,88,.4);
+  border-radius: 2px 7px 7px 2px;
+  padding: 7px 9px;
+  transform: rotate(-.7deg);
+  box-shadow: 0 2px 5px rgba(28,25,23,.09);
+}
+.blocker-note b { color: var(--brick); font-weight: 600; }
+
+.col-done-note {
+  margin-top: 6px;
+  padding: 8px;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 12px;
+  color: rgba(255,255,255,.75);
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(51,104,108,.4);
+}
+
+/* ── decorations on the canvas ── */
+.deco { position: absolute; z-index: 1; pointer-events: none; }
+.deco-footprints { left: 26px; bottom: 210px; opacity: .3; }
+.deco-starfish { left: 15%; bottom: 60px; transform: rotate(18deg); opacity: .45; }
+.deco-shell { left: 21%; top: 64px; opacity: .4; }
+.deco-gull { right: 6%; top: 76px; opacity: .5; }
+.deco-gull2 { right: 11%; top: 96px; opacity: .35; transform: scale(.7); }
+.deco-compass { right: 22px; bottom: 44px; opacity: .3; transform: rotate(-8deg); }
+
+/* ── status line ── */
+.statusline {
+  grid-area: status;
+  display: flex; align-items: center; gap: 18px;
+  padding: 0 22px;
+  background: #f2ecdd;
+  border-top: 1px solid var(--hairline);
+  font-family: var(--mono); font-size: 10px; color: var(--ink-mute);
+}
+.statusline .live { display: flex; align-items: center; gap: 6px; color: var(--sage); }
+.statusline .live i {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--sage);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(111,146,100,.35); }
+  50% { box-shadow: 0 0 0 4px rgba(111,146,100,0); }
+}
+.statusline .right { margin-left: auto; display: flex; gap: 14px; }
+
+/* ── cat corner (on the sand, facing the sea) ── */
+.cat-corner {
+  position: fixed;
+  left: 84px; bottom: 40px;
+  z-index: 20;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  pointer-events: none;
+}
+.cat-corner > * { pointer-events: auto; }
+.cat-bubble {
+  background: var(--paper);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 10px;
+  padding: 7px 11px;
+  font-size: 11px; color: var(--ink-soft);
+  box-shadow: var(--sh-2);
+  position: relative;
+  opacity: 0; transform: translateY(4px);
+  transition: all .3s var(--ease);
+  max-width: 190px;
+}
+.cat-bubble.show { opacity: 1; transform: translateY(0); }
+.cat-bubble::after {
+  content: '';
+  position: absolute; bottom: -5px; left: 50%;
+  width: 10px; height: 10px;
+  background: var(--paper);
+  border-right: 1px solid var(--hairline-strong);
+  border-bottom: 1px solid var(--hairline-strong);
+  transform: translateX(-50%) rotate(45deg);
+}
+.cat-bubble b { color: var(--ginger-deep); font-weight: 600; }
+.cat-stage { width: 150px; height: 128px; position: relative; cursor: pointer; }
+.cat-sand {
+  position: absolute; bottom: 2px; left: 50%;
+  transform: translateX(-50%);
+  width: 138px; height: 24px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(190,168,120,.5), rgba(190,168,120,.15) 65%, transparent);
+}
+.cat-svg { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); overflow: visible; }
+.cat-body-group { transform-origin: 60px 96px; animation: breathe 3.6s ease-in-out infinite; }
+@keyframes breathe { 0%,100% { transform: scale(1,1); } 50% { transform: scale(1.012,1.028); } }
+.cat-tail { transform-origin: 104px 92px; animation: tail 4.2s ease-in-out infinite; }
+@keyframes tail { 0%,100% { transform: rotate(0); } 30% { transform: rotate(6deg); } 60% { transform: rotate(-4deg); } }
+.cat-ear-r { transform-origin: 47px 34px; animation: ear 7s ease-in-out infinite; }
+@keyframes ear { 0%,88%,100% { transform: rotate(0); } 91% { transform: rotate(-9deg); } 94% { transform: rotate(4deg); } }
+.cat-eyes { transition: opacity .1s; }
+.cat-eyes.closed { opacity: 0; }
+.cat-eyes-shut { opacity: 0; transition: opacity .1s; }
+.cat-eyes-shut.closed { opacity: 1; }
+
+/* ── responsive ── */
+@media (max-width: 1100px) {
+  .board { grid-template-columns: repeat(2, 1fr); overflow-y: auto; background: linear-gradient(160deg, #f3ecda 0%, #eee4cc 30%, #c5d8cb 55%, #9ec9c1 75%, #589798 100%); }
+  .col { min-height: 60vh; }
+  .shoreline { display: none; }
+}
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-areas: "head" "board" "status"; }
+  .rail { display: none; }
+  .board { grid-template-columns: 1fr; background: linear-gradient(180deg, #f3ecda 0%, #eee4cc 30%, #c5d8cb 55%, #9ec9c1 75%, #589798 100%); }
+  .search { width: auto; flex: 1; }
+  .cat-corner, .deco { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <nav class="rail" aria-label="主导航">
+    <div class="mark">A</div>
+    <button class="rail-btn" title="项目一览" aria-label="项目一览">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v9l6 3"/></svg>
+    </button>
+    <button class="rail-btn active" title="看板" aria-label="看板">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="10" rx="1.5"/><rect x="17" y="4" width="5" height="13" rx="1.5"/></svg>
+    </button>
+    <button class="rail-btn" title="阻塞聚焦" aria-label="阻塞聚焦">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 10v4"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg>
+      <span class="badge-dot"></span>
+    </button>
+    <div class="spacer"></div>
+    <button class="rail-btn" title="任务包" aria-label="任务包">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8l8-4 8 4v8l-8 4-8-4V8z"/><path d="M4 8l8 4 8-4M12 12v8"/></svg>
+    </button>
+    <button class="rail-btn" title="设置" aria-label="设置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.4 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.4-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.2-.8.2-1.2z"/></svg>
+    </button>
+  </nav>
+
+  <header class="head">
+    <h1>
+      任务航海图
+      <svg class="gulls" width="34" height="12" viewBox="0 0 34 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 8 Q 6 3 10 8 Q 14 3 18 8"/><path d="M20 5 Q 23 1.5 26 5 Q 29 1.5 32 5"/></svg>
+      <em>全部项目 · 11 个任务</em>
+    </h1>
+    <label class="search">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input type="text" placeholder="搜索任务、项目、分支…" aria-label="搜索">
+      <kbd>/</kbd>
+    </label>
+    <div class="head-actions">
+      <div class="seg" role="tablist">
+        <button class="active" role="tab">看板</button>
+        <button role="tab">列表</button>
+        <button role="tab">时间线</button>
+      </div>
+      <button class="btn-new">＋ 新建任务</button>
+    </div>
+  </header>
+
+  <main class="board">
+
+    <!-- the shoreline: hand-drawn foam where sea meets sand -->
+    <svg class="shoreline" viewBox="0 0 80 800" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M34 -10 Q 44 50 34 110 Q 24 170 34 230 Q 44 290 34 350 Q 24 410 34 470 Q 44 530 34 590 Q 24 650 34 710 Q 44 765 34 810"
+            stroke="rgba(255,255,255,.8)" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+      <path d="M52 -10 Q 60 55 52 115 Q 44 175 52 235 Q 60 295 52 355 Q 44 415 52 475 Q 60 535 52 595 Q 44 655 52 715 Q 60 770 52 810"
+            stroke="rgba(255,255,255,.38)" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+      <g fill="rgba(255,255,255,.55)">
+        <circle cx="28" cy="60" r="2.2"/><circle cx="42" cy="150" r="1.7"/>
+        <circle cx="26" cy="260" r="2"/><circle cx="44" cy="330" r="1.5"/>
+        <circle cx="28" cy="430" r="2.2"/><circle cx="40" cy="520" r="1.7"/>
+        <circle cx="27" cy="620" r="2"/><circle cx="43" cy="700" r="1.6"/>
+      </g>
+    </svg>
+
+    <!-- decorations -->
+    <svg class="deco deco-footprints" width="96" height="66" viewBox="0 0 96 66" aria-hidden="true">
+      <g fill="#b3a083">
+        <ellipse cx="12" cy="56" rx="4.4" ry="2.8" transform="rotate(-22 12 56)"/>
+        <ellipse cx="17" cy="60" rx="4.4" ry="2.8" transform="rotate(-18 17 60)"/>
+        <ellipse cx="30" cy="46" rx="4.4" ry="2.8" transform="rotate(-20 30 46)"/>
+        <ellipse cx="35" cy="50" rx="4.4" ry="2.8" transform="rotate(-16 35 50)"/>
+        <ellipse cx="48" cy="36" rx="4.4" ry="2.8" transform="rotate(-22 48 36)"/>
+        <ellipse cx="53" cy="40" rx="4.4" ry="2.8" transform="rotate(-17 53 40)"/>
+        <ellipse cx="66" cy="26" rx="4.4" ry="2.8" transform="rotate(-20 66 26)"/>
+        <ellipse cx="71" cy="30" rx="4.4" ry="2.8" transform="rotate(-15 71 30)"/>
+      </g>
+    </svg>
+    <svg class="deco deco-starfish" width="52" height="52" viewBox="0 0 52 52" aria-hidden="true">
+      <path d="M26 4 Q 30 18 46 20 Q 33 28 37 46 Q 26 34 15 46 Q 19 28 6 20 Q 22 18 26 4 Z" fill="#dcc9a2"/>
+      <circle cx="26" cy="24" r="1.6" fill="#c4ac7d"/><circle cx="21" cy="28" r="1.2" fill="#c4ac7d"/><circle cx="31" cy="28" r="1.2" fill="#c4ac7d"/>
+    </svg>
+    <svg class="deco deco-shell" width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+      <path d="M20 6 Q 32 6 32 18 Q 32 30 20 30 Q 10 30 10 20 Q 10 12 18 12 Q 24 12 24 18 Q 24 23 19 23" fill="none" stroke="#b3a083" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    <svg class="deco deco-gull" width="40" height="14" viewBox="0 0 40 14" fill="none" stroke="rgba(255,255,255,.9)" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+      <path d="M2 9 Q 8 3 14 9 Q 20 3 26 9"/><path d="M22 12 Q 27 8 32 12 Q 37 8 38 12"/>
+    </svg>
+    <svg class="deco deco-gull2" width="40" height="14" viewBox="0 0 40 14" fill="none" stroke="rgba(255,255,255,.8)" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+      <path d="M2 9 Q 8 3 14 9 Q 20 3 26 9"/>
+    </svg>
+    <svg class="deco deco-compass" width="72" height="72" viewBox="0 0 72 72" fill="none" aria-hidden="true">
+      <circle cx="36" cy="36" r="30" stroke="rgba(255,255,255,.7)" stroke-width="1.4"/>
+      <circle cx="36" cy="36" r="24" stroke="rgba(255,255,255,.35)" stroke-width="1"/>
+      <path d="M36 12 L 41 36 L 36 60 L 31 36 Z" fill="rgba(255,255,255,.55)"/>
+      <path d="M12 36 L 36 31 L 60 36 L 36 41 Z" fill="rgba(255,255,255,.3)"/>
+      <circle cx="36" cy="36" r="3.5" fill="rgba(255,255,255,.8)"/>
+      <text x="36" y="9" text-anchor="middle" font-size="7" fill="rgba(255,255,255,.8)" font-family="serif">N</text>
+    </svg>
+
+    <!-- 沙滩 Backlog -->
+    <section class="col" data-status="backlog" aria-label="沙滩 · 待办">
+      <div class="col-head">
+        <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3 Q 20 3 20 12 Q 20 21 12 21 Q 5 21 5 13 Q 5 7 11 7 Q 16 7 16 12 Q 16 16 12 16"/></svg>
+        <h2>沙滩</h2><span class="en">BACKLOG</span><span class="n">4</span>
+        <svg class="u-wave" viewBox="0 0 76 6"><path d="M1 4 Q 10 1 19 4 T 37 4 T 55 4 T 73 4" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>
+      </div>
+      <div class="cards">
+        <button class="card">
+          <span class="tape"></span>
+          <div class="row-top"><span class="tid">AP-042</span><span class="pri p1">P1</span><span class="kind">feature</span></div>
+          <h3>用户认证流程重构 — 支持 SSO 与设备指纹</h3>
+          <div class="meta"><span class="chip">aura-core</span><span class="branch">feat/sso-flow</span></div>
+          <div class="prog"><div class="track"><div class="fill" style="width:0%"></div></div><span class="val">0%</span></div>
+          <div class="foot"><span class="avatar" style="background:#8a7f72">G</span><span class="sub">0/6 子任务</span><span class="time">due 08-04</span></div>
+        </button>
+        <button class="card dogear">
+          <div class="row-top"><span class="tid">AP-041</span><span class="pri p2">P2</span><span class="kind">docs</span></div>
+          <h3>API 参考文档补全 — invoke 命名空间全量覆盖</h3>
+          <div class="meta"><span class="chip">docs-site</span><span class="branch">docs/api-ref</span></div>
+          <div class="prog"><div class="track"><div class="fill" style="width:0%"></div></div><span class="val">0%</span></div>
+          <div class="foot"><span class="avatar" style="background:#5e949c">L</span><span class="sub">0/3 子任务</span><span class="time">due 08-09</span></div>
+        </button>
+        <button class="card">
+          <span class="tape t2"></span>
+          <div class="row-top"><span class="tid">AP-040</span><span class="pri p2">P2</span><span class="kind">refactor</span></div>
+          <h3>任务状态机抽离 — 从 store 迁移到独立 crate</h3>
+          <div class="meta"><span class="chip">aura-core</span><span class="branch">refactor/fsm</span></div>
+          <div class="prog"><div class="track"><div class="fill" style="width:0%"></div></div><span class="val">0%</span></div>
+          <div class="foot"><span class="avatar" style="background:#b85c2c">K</span><span class="sub">0/5 子任务</span><span class="time">no due</span></div>
+        </button>
+        <button class="card">
+          <span class="tape t3"></span>
+          <div class="row-top"><span class="tid">AP-039</span><span class="pri p3">P3</span><span class="kind">chore</span></div>
+          <h3>依赖升级窗口 — pnpm 11 / vite 8 全量回归</h3>
+          <div class="meta"><span class="chip">tooling</span><span class="branch">chore/deps</span></div>
+          <div class="prog"><div class="track"><div class="fill" style="width:0%"></div></div><span class="val">0%</span></div>
+          <div class="foot"><span class="avatar" style="background:#7a9e6e">M</span><span class="sub">0/2 子任务</span><span class="time">due 08-15</span></div>
+        </button>
+      </div>
+    </section>
+
+    <!-- 潮间带 In Progress -->
+    <section class="col" data-status="progress" aria-label="潮间带 · 进行中">
+      <div class="col-head">
+        <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 8 Q 5 5 8 8 T 14 8 T 20 8 M2 14 Q 5 11 8 14 T 14 14 T 20 14 M2 20 Q 5 17 8 20 T 14 20 T 20 20"/></svg>
+        <h2>潮间带</h2><span class="en">IN PROGRESS</span><span class="n">2</span>
+        <svg class="u-wave" viewBox="0 0 76 6"><path d="M1 4 Q 10 1 19 4 T 37 4 T 55 4 T 73 4" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>
+      </div>
+      <div class="cards">
+        <button class="card">
+          <span class="pin"></span>
+          <div class="row-top"><span class="tid">AP-038</span><span class="pri p0">P0</span><span class="kind">bug</span></div>
+          <h3>数据库迁移脚本在脏工作区下丢失任务备注</h3>
+          <div class="meta"><span class="chip">aura-core</span><span class="branch">fix/migrate-notes</span></div>
+          <div class="prog"><div class="track"><div class="fill" style="width:60%"></div></div><span class="val">60%</span></div>
+          <div class="blocker-note"><b>⚠ 搁浅</b> — 等待 nightly 备份验证完成后才能继续合并</div>
+          <div class="foot"><span class="avatar" style="background:#c2503c">G</span><span class="sub">3/5 子任务</span><span class="time">due 08-01</span></div>
+        </button>
+        <button class="card">
+          <div class="row-top"><span class="tid">AP-037</span><span class="pri p1">P1</span><span class="kind">feature</span></div>
+          <h3>WebSocket 实时同步通道 — 文件监听事件推送</h3>
+          <div class="meta"><span class="chip">cli</span><span class="branch">feat/ws-sync</span></div>
+          <div class="prog"><div class="track"><div class="fill" style="width:40%"></div></div><span class="val">40%</span></div>
+          <div class="foot"><span class="avatar" style="background:#8a7f72">L</span><span class="sub">2/5 子任务</span><span class="time">due 08-06</span></div>
+        </button>
+      </div>
+    </section>
+
+    <!-- 浅海 In Review -->
+    <section class="col" data-status="review" aria-label="浅海 · 待审核">
+      <div class="col-head">
+        <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 12 Q 7 7 12 12 T 21 12"/><path d="M6 15 Q 9 12 12 15 T 18 15"/><circle cx="17" cy="9" r="1" fill="currentColor"/></svg>
+        <h2>浅海</h2><span class="en">IN REVIEW</span><span class="n">2</span>
+        <svg class="u-wave" viewBox="0 0 76 6"><path d="M1 4 Q 10 1 19 4 T 37 4 T 55 4 T 73 4" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>
+      </div>
+      <div class="cards">
+        <button class="card">
+          <div class="row-top"><span class="tid">AP-035</span><span class="pri p2">P2</span><span class="kind">refactor</span></div>
+          <h3>主题系统重构 — CSS 变量三层归一为单层 token</h3>
+          <div class="meta"><span class="chip">aura-core</span><span class="branch">refactor/theme</span></div>
+          <div class="prog"><div class="track"><div class="fill" style="width:80%"></div></div><span class="val">80%</span></div>
+          <div class="foot"><span class="avatar" style="background:#5e949c">K</span><span class="sub">4/5 子任务</span><span class="time">reviewer: G</span></div>
+        </button>
+        <button class="card">
+          <div class="row-top"><span class="tid">AP-034</span><span class="pri p1">P1</span><span class="kind">test</span></div>
+          <h3>Push 流程端到端测试 — mock agent 全链路覆盖</h3>
+          <div class="meta"><span class="chip">cli</span><span class="branch">test/push-e2e</span></div>
+          <div class="prog"><div class="track"><div class="fill" style="width:90%"></div></div><span class="val">90%</span></div>
+          <div class="foot"><span class="avatar" style="background:#b85c2c">M</span><span class="sub">5/6 子任务</span><span class="time">reviewer: L</span></div>
+        </button>
+      </div>
+    </section>
+
+    <!-- 深海 Done -->
+    <section class="col" data-status="done" aria-label="深海 · 已完成">
+      <div class="col-head">
+        <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 8 Q 10 6 12 4 M12 8 Q 14 6 12 4"/><path d="M6 20 Q 12 16 18 20"/></svg>
+        <h2>深海</h2><span class="en">DONE</span><span class="n">3</span>
+        <svg class="u-wave" viewBox="0 0 76 6"><path d="M1 4 Q 10 1 19 4 T 37 4 T 55 4 T 73 4" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>
+      </div>
+      <div class="cards">
+        <button class="card">
+          <span class="stamp">完成</span>
+          <div class="row-top"><span class="tid">AP-031</span><span class="pri p3">P3</span><span class="kind">chore</span></div>
+          <h3>CI/CD 流水线搭建 — 三平台构建产物签名</h3>
+          <div class="meta"><span class="chip">tooling</span><span class="branch">main</span></div>
+          <div class="prog"><div class="track"><div class="fill" style="width:100%"></div></div><span class="val">100%</span></div>
+          <div class="foot"><span class="avatar" style="background:#7a9e6e">G</span><span class="sub">4/4 子任务</span><span class="time">07-28</span></div>
+        </button>
+        <button class="card">
+          <span class="stamp">完成</span>
+          <div class="row-top"><span class="tid">AP-030</span><span class="pri p2">P2</span><span class="kind">test</span></div>
+          <h3>单元测试覆盖率提升至 80% — store 层全量</h3>
+          <div class="meta"><span class="chip">cli</span><span class="branch">main</span></div>
+          <div class="prog"><div class="track"><div class="fill" style="width:100%"></div></div><span class="val">100%</span></div>
+          <div class="foot"><span class="avatar" style="background:#8a7f72">L</span><span class="sub">7/7 子任务</span><span class="time">07-27</span></div>
+        </button>
+        <button class="card">
+          <span class="stamp">完成</span>
+          <div class="row-top"><span class="tid">AP-028</span><span class="pri p2">P2</span><span class="kind">feature</span></div>
+          <h3>诊断面板协议升级 — 按项目分组 + 严重度标注</h3>
+          <div class="meta"><span class="chip">aura-core</span><span class="branch">main</span></div>
+          <div class="prog"><div class="track"><div class="fill" style="width:100%"></div></div><span class="val">100%</span></div>
+          <div class="foot"><span class="avatar" style="background:#5e949c">K</span><span class="sub">3/3 子任务</span><span class="time">07-25</span></div>
+        </button>
+        <div class="col-done-note">海水会把完成的工作温柔收藏</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="statusline">
+    <span class="live"><i></i>实时同步</span>
+    <span>3 个项目</span>
+    <span>11 个任务</span>
+    <span style="color:var(--brick)">2 个阻塞</span>
+    <span class="right">
+      <span>今日有风，适合推进</span>
+      <span>v0.3.0</span>
+    </span>
+  </footer>
+</div>
+
+<!-- cat on the sand, facing the sea -->
+<div class="cat-corner">
+  <div class="cat-bubble" id="catBubble">潮水涨上来了，<b>2 个任务</b>正在潮间带</div>
+  <div class="cat-stage" id="catStage" title="摸摸猫">
+    <div class="cat-sand"></div>
+    <svg class="cat-svg" width="120" height="110" viewBox="0 0 120 110" aria-label="一只趴在沙滩上的橘猫">
+      <g style="transform: translate(120px,0) scale(-1,1)">
+        <g class="cat-body-group">
+          <path class="cat-tail" d="M104 92 Q 118 88 116 74 Q 115 66 108 66 Q 112 70 110 76 Q 106 84 98 86 Z" fill="#d97742"/>
+          <ellipse cx="62" cy="86" rx="42" ry="24" fill="#e8975a"/>
+          <ellipse cx="62" cy="90" rx="34" ry="17" fill="#f0b285"/>
+          <ellipse cx="88" cy="98" rx="12" ry="6" fill="#f7e0c8"/>
+          <path d="M78 68 Q 82 74 80 80" stroke="#d17f42" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <path d="M88 70 Q 92 76 90 82" stroke="#d17f42" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <path d="M68 66 Q 72 72 70 78" stroke="#d17f42" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <ellipse cx="40" cy="98" rx="13" ry="5.5" fill="#f7e0c8"/>
+          <ellipse cx="26" cy="97" rx="11" ry="5" fill="#f7e0c8"/>
+          <g>
+            <circle cx="40" cy="46" r="21" fill="#e8975a"/>
+            <path d="M26 34 L 24 16 L 38 26 Z" fill="#e8975a"/>
+            <path d="M27.5 30 L 26.5 20 L 35 26 Z" fill="#f0b285"/>
+            <g class="cat-ear-r">
+              <path d="M54 34 L 56 16 L 42 26 Z" fill="#e8975a"/>
+              <path d="M52.5 30 L 53.5 20 L 45 26 Z" fill="#f0b285"/>
+            </g>
+            <path d="M34 28 Q 35 33 34 37" stroke="#d17f42" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+            <path d="M40 27 Q 41 32 40 36" stroke="#d17f42" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+            <path d="M46 28 Q 47 33 46 37" stroke="#d17f42" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+            <ellipse cx="40" cy="54" rx="12" ry="9" fill="#f7e0c8"/>
+            <g class="cat-eyes" id="eyesOpen">
+              <ellipse cx="32" cy="45" rx="2.6" ry="3.2" fill="#3a2e28"/>
+              <ellipse cx="48" cy="45" rx="2.6" ry="3.2" fill="#3a2e28"/>
+              <circle cx="32.8" cy="43.8" r=".9" fill="#fff"/>
+              <circle cx="48.8" cy="43.8" r=".9" fill="#fff"/>
+            </g>
+            <g class="cat-eyes-shut" id="eyesShut">
+              <path d="M29 45 Q 32 47.5 35 45" stroke="#3a2e28" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+              <path d="M45 45 Q 48 47.5 51 45" stroke="#3a2e28" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+            </g>
+            <path d="M38 52 L 42 52 L 40 54.5 Z" fill="#d4816a"/>
+            <path d="M40 54.5 Q 40 57 37 58 M40 54.5 Q 40 57 43 58" stroke="#b86a52" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+            <path d="M22 50 L 10 47 M22 54 L 11 55" stroke="rgba(58,46,40,.35)" stroke-width="1" stroke-linecap="round"/>
+            <path d="M58 50 L 70 47 M58 54 L 69 55" stroke="rgba(58,46,40,.35)" stroke-width="1" stroke-linecap="round"/>
+          </g>
+        </g>
+      </g>
+    </svg>
+  </div>
+</div>
+
+<script>
+(function () {
+  const open = document.getElementById('eyesOpen');
+  const shut = document.getElementById('eyesShut');
+  const bubble = document.getElementById('catBubble');
+  const stage = document.getElementById('catStage');
+
+  function blink() {
+    open.classList.add('closed');
+    shut.classList.add('closed');
+    setTimeout(() => {
+      open.classList.remove('closed');
+      shut.classList.remove('closed');
+    }, 140);
+    setTimeout(blink, 2600 + Math.random() * 3200);
+  }
+  setTimeout(blink, 1800);
+
+  setTimeout(() => bubble.classList.add('show'), 1200);
+  setTimeout(() => bubble.classList.remove('show'), 7200);
+
+  const lines = [
+    '喵——',
+    '海浪会把完成的任务带走',
+    '那张搁浅的卡，要一起去看看吗',
+    '潮水退了又涨，backlog 也是',
+    '晒着太阳，盯着你写代码'
+  ];
+  let li = 0;
+  stage.addEventListener('click', () => {
+    li = (li + 1) % lines.length;
+    bubble.innerHTML = lines[li];
+    bubble.classList.add('show');
+    clearTimeout(bubble._t);
+    bubble._t = setTimeout(() => bubble.classList.remove('show'), 3200);
+  });
+
+  document.querySelectorAll('.card').forEach(c => {
+    c.addEventListener('click', () => {
+      document.querySelectorAll('.card').forEach(x => x.classList.remove('selected'));
+      c.classList.add('selected');
+      bubble.innerHTML = '盯上了 <b>' + (c.querySelector('.tid')?.textContent || '任务') + '</b>，别让它搁浅';
+      bubble.classList.add('show');
+      clearTimeout(bubble._t);
+      bubble._t = setTimeout(() => bubble.classList.remove('show'), 3000);
+    });
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
+      e.preventDefault();
+      document.querySelector('.search input').focus();
+    }
+  });
+})();
+</script>
+</body>
+</html>
