@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useAgentsStore } from '../stores/agents'
-import type { LocatedTask, PointerPrompt, ProjectSnapshot, PushOutcome } from '../types/protocol'
+import type { GitWorkspaceStatus, LocatedTask, PointerPrompt, ProjectSnapshot, PushOutcome } from '../types/protocol'
 import UiIcon from './UiIcon.vue'
 
 const props = defineProps<{ task: LocatedTask; project: ProjectSnapshot }>()
@@ -17,6 +17,12 @@ const error = ref<string | null>(null)
 const showManual = ref(false)
 const manualSessionId = ref('')
 const manualName = ref('')
+const branchStrategy = ref<'current' | 'new'>('current')
+const branchName = ref(`task/${props.task.document.id ?? 'new-task'}`)
+const gitStatus = ref<GitWorkspaceStatus | null>(null)
+const gitError = ref<string | null>(null)
+const branchResult = ref<string | null>(null)
+const branchResultSuccess = ref(false)
 
 const selectedEntry = computed(() => agents.profiles.find((entry) => entry.profile.id === selectedProfile.value))
 const selectedBinding = computed(() => agents.sessions.find((session) => session.id === selectedSession.value))
@@ -25,19 +31,30 @@ const canForkSession = computed(() => selectedBinding.value?.provider === 'codex
 const canControlLiveTurn = computed(() => selectedBinding.value?.provider === 'codex'
   && selectedBinding.value.state === 'running' && Boolean(selectedBinding.value.active_turn_id))
 const copiesOnly = computed(() => selectedEntry.value?.profile.launch_mode === 'clipboard_only')
+const hasActiveProjectSession = computed(() => agents.sessions.some((session) => [
+  'starting', 'running', 'waiting_approval', 'interrupting',
+].includes(session.state)))
 const primaryLabel = computed(() => {
   if (busy.value) return mode.value === 'existing' ? '正在追加…' : copiesOnly.value ? '正在复制…' : '正在创建并绑定…'
   if (mode.value === 'existing') return 'Push 到所选 Session'
   if (copiesOnly.value) return '复制任务指令'
   return `新建 Session 并 Push 给 ${selectedEntry.value?.profile.display_name ?? 'Agent'}`
 })
-const canSubmit = computed(() => mode.value === 'existing' ? Boolean(selectedBinding.value) : Boolean(selectedEntry.value))
+const canSubmit = computed(() => {
+  if (mode.value === 'existing') return Boolean(selectedBinding.value)
+  if (!selectedEntry.value) return false
+  return branchStrategy.value === 'current'
+    || Boolean(gitStatus.value?.is_repository && branchName.value.trim() && !hasActiveProjectSession.value)
+})
 const shortId = (value: string) => value.length > 22 ? `${value.slice(0, 12)}…${value.slice(-7)}` : value
 const formatTime = (value: string) => new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 
 onMounted(async () => {
   try {
-    await Promise.all([agents.load(), agents.loadSessions(props.project.registration.id)])
+    const gitInspection = agents.gitStatus(props.project.registration.id)
+      .then((status) => { gitStatus.value = status })
+      .catch((caught) => { gitError.value = `无法读取 Git 状态：${String(caught)}` })
+    await Promise.all([agents.load(), agents.loadSessions(props.project.registration.id), gitInspection])
     selectedProfile.value = agents.profiles.find((entry) => entry.profile.id === props.project.registration.last_profile_id)?.profile.id
       ?? agents.profiles.find((entry) => entry.availability.available && entry.profile.id !== 'clipboard-only')?.profile.id
       ?? agents.profiles.find((entry) => entry.profile.id === 'clipboard-only')?.profile.id
@@ -74,11 +91,32 @@ const applySessionOutcome = (result: PushOutcome) => {
 
 const push = async () => {
   if (!props.task.document.id || !canSubmit.value) return
-  busy.value = true; error.value = null; outcome.value = null
+  busy.value = true; error.value = null; outcome.value = null; branchResult.value = null; branchResultSuccess.value = false
   try {
+    const requestedBranch = mode.value === 'new' && branchStrategy.value === 'new'
+      ? branchName.value.trim()
+      : null
     outcome.value = mode.value === 'existing'
       ? await agents.pushExisting(props.project.registration.id, props.task.document.id, selectedSession.value)
-      : await agents.push(props.project.registration.id, props.task.document.id, selectedProfile.value)
+      : await agents.push(
+        props.project.registration.id,
+        props.task.document.id,
+        selectedProfile.value,
+        requestedBranch,
+      )
+    if (requestedBranch) {
+      try {
+        gitStatus.value = await agents.gitStatus(props.project.registration.id)
+        branchResultSuccess.value = gitStatus.value.current_branch === requestedBranch
+        branchResult.value = branchResultSuccess.value
+          ? `当前工作树已切换到 ${requestedBranch}`
+          : `分支操作后当前分支为 ${gitStatus.value.current_branch ?? 'detached HEAD'}，请检查后再继续`
+        if (branchResultSuccess.value) branchStrategy.value = 'current'
+      } catch (caught) {
+        branchResultSuccess.value = false
+        branchResult.value = `Push 已返回，但无法重新确认 Git 分支：${String(caught)}`
+      }
+    }
     if (mode.value === 'new') props.project.registration.last_profile_id = selectedProfile.value
     applySessionOutcome(outcome.value)
   } catch (caught) { error.value = String(caught) }
@@ -136,10 +174,25 @@ const controlLiveTurn = async (action: 'steer' | 'interrupt') => {
               <b>{{ entry.profile.launch_mode === 'clipboard_only' ? '仅复制' : '新建 Session' }}</b>
             </button>
           </div>
+          <section class="git-branch-section" aria-labelledby="git-branch-title">
+            <div><strong id="git-branch-title">Git 分支策略</strong><small>与 Agent Session 分支是两个独立概念</small></div>
+            <label :class="['branch-option', { selected: branchStrategy === 'current' }]">
+              <input v-model="branchStrategy" type="radio" value="current"/>
+              <span><strong>沿用当前分支</strong><small>{{ gitStatus?.current_branch ?? (gitStatus?.is_repository ? 'detached HEAD' : '不会执行 Git 操作') }}</small></span>
+            </label>
+            <label :class="['branch-option', { selected: branchStrategy === 'new', disabled: !gitStatus?.is_repository || hasActiveProjectSession }]">
+              <input v-model="branchStrategy" type="radio" value="new" :disabled="!gitStatus?.is_repository || hasActiveProjectSession"/>
+              <span><strong>创建并切换到新 Git 分支</strong><small>分支创建成功后才会启动 Agent</small></span>
+            </label>
+            <label v-if="branchStrategy === 'new'" class="field branch-name"><span>新分支名称</span><input v-model="branchName" required autocomplete="off" placeholder="task/TASK-001"/></label>
+            <p v-if="gitStatus?.dirty" class="branch-warning"><UiIcon name="alert" :size="14"/>工作区有未提交变更；创建分支时会保留这些变更。</p>
+            <p v-if="hasActiveProjectSession" class="branch-warning"><UiIcon name="alert" :size="14"/>项目有正在工作的 Session，暂时不能切换工作树分支。</p>
+            <p v-if="gitError" class="branch-warning"><UiIcon name="alert" :size="14"/>{{ gitError }}</p>
+          </section>
         </template>
 
         <template v-else>
-          <p class="push-notice"><strong>继续项目已有 Session。</strong>AuraPilot 无法保证会话上下文仍适合当前任务，请检查 Profile、项目和 Session ID。默认在安全边界追加。</p>
+          <p class="push-notice"><strong>继续项目已有 Session。</strong>AuraPilot 无法保证会话上下文仍适合当前任务，请检查 Profile、项目和 Session ID。默认在安全边界追加；此模式不会切换 Git 分支。</p>
           <div v-if="agents.sessions.length" class="session-list">
             <button v-for="session in agents.sessions" :key="session.id" :class="['session-option', { selected: selectedSession === session.id }]" @click="selectedSession = session.id">
               <span :class="['session-state', session.state]"/>
@@ -166,6 +219,7 @@ const controlLiveTurn = async (action: 'steer' | 'interrupt') => {
 
         <section v-if="preview" class="prompt-preview"><div><strong>Pointer Prompt</strong><span>{{ preview.text.length }} 字符</span></div><pre>{{ preview.text }}</pre></section>
         <p v-if="outcome" :class="['push-result', outcome.attempt.status === 'failed_to_start' ? 'warning' : 'success']" role="status" aria-live="polite">{{ outcome.message }}</p>
+        <p v-if="branchResult" :class="['push-result', branchResultSuccess ? 'success' : 'warning']" role="status">{{ branchResult }}</p>
         <p v-if="error || agents.error" class="form-error" role="alert" aria-live="assertive">{{ error || agents.error }}</p>
       </div>
       <footer><span class="push-safety">Push 不会领取任务或修改任务状态</span><button class="button secondary" @click="$emit('close')">关闭</button><button class="button primary" :disabled="busy || !canSubmit" @click="push"><UiIcon name="send" :size="15"/>{{ primaryLabel }}</button></footer>

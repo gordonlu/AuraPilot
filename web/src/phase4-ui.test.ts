@@ -1,13 +1,13 @@
 import { createPinia } from 'pinia'
 import { mount, flushPromises } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import PushTaskModal from './components/PushTaskModal.vue'
 import { demoSnapshots } from './demo'
 import { useAgentsStore } from './stores/agents'
 
 describe('Phase 4 Push Dispatcher UI', () => {
-  it('offers OpenCode and at least three agents while preserving the task state', async () => {
+  it('offers an explicit Git branch strategy before a new Session without changing task state', async () => {
     const project = demoSnapshots()[0]
     const task = project.tasks.find((item) => item.state === 'backlog')!
     const originalState = task.state
@@ -17,18 +17,28 @@ describe('Phase 4 Push Dispatcher UI', () => {
       global: { plugins: [pinia] },
     })
     await flushPromises()
+    const agents = useAgentsStore(pinia)
+    const push = vi.spyOn(agents, 'push')
 
     expect(wrapper.findAll('.agent-option').length).toBeGreaterThanOrEqual(3)
     expect(wrapper.text()).toContain('OpenCode')
     expect(wrapper.text()).toContain('.aurapilot/AGENTS.md')
     expect(wrapper.text()).toContain('由你选择新 Session 或项目已有 Session')
     expect(wrapper.text()).toContain('Session 会锁定所选 Profile')
+    expect(wrapper.text()).toContain('Git 分支策略')
+    expect(wrapper.text()).toContain('沿用当前分支')
+    expect(wrapper.text()).toContain('与 Agent Session 分支是两个独立概念')
+    await wrapper.findAll('.branch-option input')[1].setValue(true)
+    await wrapper.find('.branch-name input').setValue('task/TASK-009')
     await wrapper.findAll('.agent-option')[4].trigger('click')
     expect(wrapper.find('button.button.primary').text()).toContain('新建 Session 并 Push 给 OpenCode')
     await wrapper.find('button.button.primary').trigger('click')
     await flushPromises()
 
+    expect(push).toHaveBeenCalledWith(project.registration.id, task.document.id, 'opencode', 'task/TASK-009')
     expect(wrapper.text()).toContain('OpenCode 已启动')
+    expect(wrapper.text()).toContain('当前工作树已切换到 task/TASK-009')
+    expect((wrapper.find('.branch-option input:checked').element as HTMLInputElement).value).toBe('current')
     expect(task.state).toBe(originalState)
     expect(task.document.assigned).toBeNull()
   })
@@ -45,6 +55,7 @@ describe('Phase 4 Push Dispatcher UI', () => {
 
     await wrapper.findAll('.push-mode-switch button')[1].trigger('click')
     expect(wrapper.text()).toContain('AuraPilot 无法保证会话上下文仍适合当前任务')
+    expect(wrapper.text()).toContain('此模式不会切换 Git 分支')
     expect(wrapper.find('button.button.primary').attributes('disabled')).toBeDefined()
     await wrapper.find('.manual-bind-toggle').trigger('click')
     expect(wrapper.find('.manual-session-form').exists()).toBe(true)

@@ -6,6 +6,7 @@ import type {
   AgentLaunchProfile,
   AgentProfileEntry,
   AgentSessionBinding,
+  GitWorkspaceStatus,
   PointerPrompt,
   PushOutcome,
   PushAttempt,
@@ -54,6 +55,7 @@ export const useAgentsStore = defineStore('agents', {
     loading: false,
     error: null as string | null,
     sessions: [] as AgentSessionBinding[],
+    gitWorkspaces: {} as Record<string, GitWorkspaceStatus>,
     runtimeError: null as string | null,
     stopListening: null as UnlistenFn | null,
   }),
@@ -124,12 +126,40 @@ export const useAgentsStore = defineStore('agents', {
       else this.sessions.unshift(session)
       return session
     },
-    async push(projectId: string, taskId: string, profileId: string): Promise<PushOutcome> {
-      if (isTauri()) return invokeBackend('push_task', { projectId, taskId, profileId })
+    async gitStatus(projectId: string): Promise<GitWorkspaceStatus> {
+      if (isTauri()) {
+        const status = await invokeBackend<GitWorkspaceStatus>('get_git_workspace_status', { projectId })
+        this.gitWorkspaces[projectId] = status
+        return status
+      }
+      const status = this.gitWorkspaces[projectId] ?? {
+        is_repository: true,
+        current_branch: 'main',
+        dirty: false,
+        detail: 'Git 工作区干净（演示）',
+      }
+      this.gitWorkspaces[projectId] = status
+      return status
+    },
+    async push(
+      projectId: string,
+      taskId: string,
+      profileId: string,
+      gitBranchName: string | null = null,
+    ): Promise<PushOutcome> {
+      if (isTauri()) return invokeBackend('push_task', { projectId, taskId, profileId, gitBranchName })
       const pointer_prompt = await this.preview(projectId, taskId)
+      if (gitBranchName) {
+        this.gitWorkspaces[projectId] = {
+          is_repository: true,
+          current_branch: gitBranchName,
+          dirty: false,
+          detail: 'Git 工作区干净（演示）',
+        }
+      }
       return {
         pointer_prompt,
-        message: `${this.profiles.find((item) => item.profile.id === profileId)?.profile.display_name} 已启动（演示）`,
+        message: `${gitBranchName ? `Git 分支 ${gitBranchName} 已创建；` : ''}${this.profiles.find((item) => item.profile.id === profileId)?.profile.display_name} 已启动（演示）`,
         attempt: {
           id: crypto.randomUUID(), task_id: taskId, project_id: projectId,
           agent_profile_id: profileId, created_at: new Date().toISOString(), status: 'started',

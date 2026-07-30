@@ -155,6 +155,7 @@ onMounted(async () => {
     }
     if (preview.get('modal') === 'create' && allSnapshots.value.length) modal.value = 'create'
     if (preview.get('modal') === 'transfer' && allSnapshots.value.length) modal.value = 'transfer'
+    if (preview.get('modal') === 'push' && selected.value) modal.value = 'push'
     const agentError = preview.get('agentError')
     if (agentError) agentsStore.runtimeError = agentError
   }

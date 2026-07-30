@@ -32,6 +32,9 @@ pub struct CoreConfig {
     pub aura_kdf_memory_kib: u32,
     pub aura_kdf_iterations: u32,
     pub aura_kdf_parallelism: u32,
+    pub git_command_timeout: Duration,
+    pub git_poll_interval: Duration,
+    pub git_error_output_limit_bytes: usize,
 }
 
 impl Default for CoreConfig {
@@ -64,6 +67,9 @@ impl Default for CoreConfig {
             aura_kdf_memory_kib: 64 * 1024,
             aura_kdf_iterations: 3,
             aura_kdf_parallelism: 1,
+            git_command_timeout: Duration::from_secs(10),
+            git_poll_interval: Duration::from_millis(50),
+            git_error_output_limit_bytes: 4_096,
         }
     }
 }
@@ -103,5 +109,8 @@ mod tests {
         assert_eq!(config.aura_kdf_memory_kib, 64 * 1024);
         assert_eq!(config.aura_kdf_iterations, 3);
         assert_eq!(config.aura_kdf_parallelism, 1);
+        assert_eq!(config.git_command_timeout, Duration::from_secs(10));
+        assert_eq!(config.git_poll_interval, Duration::from_millis(50));
+        assert_eq!(config.git_error_output_limit_bytes, 4_096);
     }
 }

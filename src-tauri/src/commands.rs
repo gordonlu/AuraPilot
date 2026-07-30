@@ -10,6 +10,9 @@ use aurapilot_core::aura_package::{
     AuraExportReport, AuraImportPreview, AuraImportReport, ExportOptions, export_tasks,
     import_tasks, preview_import,
 };
+use aurapilot_core::git_workspace::{
+    GitWorkspaceStatus, create_and_checkout_branch, inspect_repository,
+};
 use aurapilot_core::initializer::{InitOptions, initialize_repository};
 use aurapilot_core::pointer_prompt::{PointerPrompt, build_pointer_prompt};
 use aurapilot_core::project_registry::RegisteredProject;
@@ -662,6 +665,19 @@ pub async fn delete_task(
     let project = registered_project(&project_id, &state)?;
     delete_one(&project.path, &task_id)
         .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn get_git_workspace_status(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<GitWorkspaceStatus, String> {
+    let project = registered_project(&project_id, &state)?;
+    let config = state.config.clone();
+    tauri::async_runtime::spawn_blocking(move || inspect_repository(&project.path, &config))
+        .await
+        .map_err(|error| format!("Git inspection worker failed: {error}"))?
         .map_err(|error| error.to_string())
 }
 
@@ -2146,6 +2162,7 @@ pub async fn push_task(
     project_id: String,
     task_id: String,
     profile_id: String,
+    git_branch_name: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<PushOutcome, String> {
@@ -2175,6 +2192,75 @@ pub async fn push_task(
         .requested(project.id, &task_id, &profile_id)
         .map_err(|error| error.to_string())?;
     emit_or_log(&app, PUSH_ATTEMPT_EVENT, &attempt);
+
+    if let Some(branch_name) = git_branch_name.map(|value| value.trim().to_owned()) {
+        let active_session = state
+            .runtime
+            .lock()
+            .map_err(|error| error.to_string())?
+            .list_sessions(project.id)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|session| {
+                matches!(
+                    session.state,
+                    SessionRuntimeState::Starting
+                        | SessionRuntimeState::Running
+                        | SessionRuntimeState::WaitingApproval
+                        | SessionRuntimeState::Interrupting
+                )
+            });
+        if let Some(session) = active_session {
+            let message = format!(
+                "创建 Git 分支失败，Agent 未启动：项目 Session `{}` 正在使用当前工作树",
+                session
+                    .display_name
+                    .as_deref()
+                    .unwrap_or(&session.profile_id)
+            );
+            let failed = update_attempt(
+                &state,
+                attempt.id,
+                PushAttemptStatus::FailedToStart,
+                None,
+                Some(message.clone()),
+                PushDelivery::Process,
+            )?;
+            emit_or_log(&app, PUSH_ATTEMPT_EVENT, &failed);
+            return Ok(PushOutcome {
+                attempt: failed,
+                pointer_prompt,
+                message,
+                session: None,
+            });
+        }
+        let repository = project.path.clone();
+        let config = state.config.clone();
+        let branch_for_worker = branch_name.clone();
+        let branch_result = tauri::async_runtime::spawn_blocking(move || {
+            create_and_checkout_branch(&repository, &branch_for_worker, &config)
+        })
+        .await
+        .map_err(|error| format!("Git branch worker failed: {error}"))?;
+        if let Err(error) = branch_result {
+            let message = format!("创建 Git 分支失败，Agent 未启动：{error}");
+            let failed = update_attempt(
+                &state,
+                attempt.id,
+                PushAttemptStatus::FailedToStart,
+                None,
+                Some(message.clone()),
+                PushDelivery::Process,
+            )?;
+            emit_or_log(&app, PUSH_ATTEMPT_EVENT, &failed);
+            return Ok(PushOutcome {
+                attempt: failed,
+                pointer_prompt,
+                message,
+                session: None,
+            });
+        }
+    }
 
     if profile_id == "codex" {
         return push_new_codex_session(

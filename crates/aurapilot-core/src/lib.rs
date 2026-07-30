@@ -3,6 +3,7 @@ pub mod app_paths;
 pub mod aura_package;
 pub mod config;
 pub mod diagnostic;
+pub mod git_workspace;
 pub mod initializer;
 pub mod lock;
 pub mod model;

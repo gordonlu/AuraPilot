@@ -176,6 +176,13 @@ export interface PushOutcome {
   session?: AgentSessionBinding | null
 }
 
+export interface GitWorkspaceStatus {
+  is_repository: boolean
+  current_branch: string | null
+  dirty: boolean
+  detail: string
+}
+
 export type AgentProvider = 'codex' | 'claude_code' | 'open_code' | 'other'
 export type SessionBindingSource = 'managed' | 'discovered' | 'integration_reported' | 'manual'
 export type SessionVerification = 'verified' | 'unverified' | 'unavailable'
