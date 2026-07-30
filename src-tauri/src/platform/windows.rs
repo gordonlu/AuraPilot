@@ -58,6 +58,15 @@ pub fn copy_text(text: &str) -> io::Result<()> {
         .ok_or_else(|| io::Error::other("Set-Clipboard failed"))
 }
 
+pub fn open_folder(path: &Path) -> io::Result<Child> {
+    Command::new("explorer.exe")
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+}
+
 pub fn launch_terminal(prepared: &PreparedLaunch, executable: &Path) -> io::Result<Child> {
     if prepared.prompt_transport == PromptTransport::Stdin {
         return Err(io::Error::new(

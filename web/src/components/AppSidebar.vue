@@ -9,7 +9,7 @@ import UiIcon from './UiIcon.vue'
 const props = defineProps<{
   snapshots: ProjectSnapshot[]
   activeProject: string
-  activeView: 'board' | 'blocked'
+  activeView: 'projects' | 'board' | 'blocked'
   theme: Theme
   diagnosticCount: number
 }>()
@@ -25,7 +25,7 @@ const themePresentation = computed(() => ({
 
 defineEmits<{
   project: [id: string]
-  view: [view: 'board' | 'blocked']
+  view: [view: 'projects' | 'board' | 'blocked']
   add: []
   theme: []
   diagnostics: []
@@ -64,6 +64,9 @@ defineEmits<{
     </nav>
 
     <nav class="primary-nav" aria-label="主导航">
+      <button :class="['nav-row', { active: activeView === 'projects' }]" @click="$emit('view', 'projects')">
+        <UiIcon name="folder"/><span>项目一览</span><b>{{ snapshots.length }}</b>
+      </button>
       <button :class="['nav-row', { active: activeView === 'board' }]" @click="$emit('view', 'board')">
         <UiIcon name="board"/><span>看板</span>
       </button>

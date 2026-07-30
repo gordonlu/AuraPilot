@@ -30,6 +30,10 @@ pub fn copy_text(text: &str) -> io::Result<()> {
     imp::copy_text(text)
 }
 
+pub fn open_folder(path: &Path) -> io::Result<Child> {
+    imp::open_folder(path)
+}
+
 pub fn launch(prepared: &PreparedLaunch) -> io::Result<Child> {
     if prepared.launch_mode == LaunchMode::ClipboardOnly {
         return Err(io::Error::new(
@@ -126,6 +130,13 @@ mod imp {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "clipboard is unsupported on this platform",
+        ))
+    }
+
+    pub fn open_folder(_path: &Path) -> io::Result<Child> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "opening folders is unsupported on this platform",
         ))
     }
 

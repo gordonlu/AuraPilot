@@ -1,13 +1,43 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { createPinia } from 'pinia'
+import { describe, expect, it, vi } from 'vitest'
 import BoardView from './components/BoardView.vue'
 import AddProjectModal from './components/AddProjectModal.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import TaskFormModal from './components/TaskFormModal.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
+import ProjectsView from './components/ProjectsView.vue'
 import { demoSnapshots } from './demo'
+import { useProjectsStore } from './stores/projects'
 
 describe('Phase 3 production UI', () => {
+  it('summarizes every project and opens the selected project board', async () => {
+    const snapshots = demoSnapshots()
+    const pinia = createPinia()
+    const store = useProjectsStore(pinia)
+    const openFolder = vi.spyOn(store, 'openFolder').mockResolvedValue()
+    const wrapper = mount(ProjectsView, {
+      props: { snapshots, search: '' },
+      global: { plugins: [pinia] },
+    })
+
+    expect(wrapper.findAll('.project-overview-card')).toHaveLength(3)
+    expect(wrapper.text()).toContain('项目一览')
+    expect(wrapper.text()).toContain('aurapilot')
+    expect(wrapper.text()).toContain('server-core')
+    expect(wrapper.text()).toContain('web-dashboard')
+    expect(wrapper.find('.project-summary').text()).toContain('阻塞2')
+
+    await wrapper.findAll('.project-folder')[0].trigger('click')
+    expect(openFolder).toHaveBeenCalledWith(snapshots[0].registration.id)
+    await wrapper.findAll('.project-open')[1].trigger('click')
+    expect(wrapper.emitted('open')?.[0]).toEqual([snapshots[1].registration.id])
+
+    await wrapper.setProps({ search: 'web-dashboard' })
+    expect(wrapper.findAll('.project-overview-card')).toHaveLength(1)
+    expect(wrapper.text()).toContain('web-dashboard')
+  })
+
   it('only marks a positive blocked-task count as dangerous', async () => {
     const snapshots = demoSnapshots()
     for (const snapshot of snapshots) {
@@ -94,5 +124,22 @@ describe('Phase 3 production UI', () => {
     expect(wrapper.emitted('push')).toHaveLength(1)
     expect(wrapper.emitted('transition')).toBeUndefined()
     expect(task.state).toBe(originalState)
+  })
+
+  it('completes without asking for a commit that AuraPilot did not create', async () => {
+    const project = demoSnapshots()[0]
+    const task = project.tasks.find((item) => item.state === 'in-review')!
+    const wrapper = mount(TaskDrawer, {
+      props: { project, task, diagnostics: [] },
+    })
+
+    await wrapper.find('.transition-section select').setValue('done')
+    expect(wrapper.find('.commit-field').exists()).toBe(false)
+    expect(wrapper.text()).toContain('完成任务不会创建 Git Commit')
+    expect(wrapper.text()).toContain('不会自动关联仓库最新提交')
+    await wrapper.find('.transition-section .button').trigger('click')
+    expect(wrapper.emitted('transition')?.[0]?.[0]).toEqual({
+      target: 'done', assigned: 'gemini-cli', branch: 'feature/bulk-actions',
+    })
   })
 })

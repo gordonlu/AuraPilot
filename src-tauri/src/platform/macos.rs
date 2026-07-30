@@ -45,6 +45,15 @@ pub fn copy_text(text: &str) -> io::Result<()> {
         .ok_or_else(|| io::Error::other("pbcopy failed"))
 }
 
+pub fn open_folder(path: &Path) -> io::Result<Child> {
+    Command::new("/usr/bin/open")
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+}
+
 pub fn launch_terminal(_prepared: &PreparedLaunch, _executable: &Path) -> io::Result<Child> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,

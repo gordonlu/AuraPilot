@@ -7,9 +7,10 @@ use commands::{
     add_project, bind_agent_session, create_task, delete_agent_profile, delete_task,
     export_aura_tasks, fork_task_session, get_git_workspace_status, import_aura_tasks,
     initialize_project, interrupt_task_session, list_agent_profiles, list_agent_sessions,
-    list_projects, list_push_attempts, preview_aura_import, preview_pointer_prompt, push_task,
-    push_task_to_session, remove_project, save_agent_profile, scan_project, scan_projects,
-    steer_task_session, test_agent_profile, transition_task, update_agent_session, update_task,
+    list_projects, list_push_attempts, open_project_folder, preview_aura_import,
+    preview_pointer_prompt, push_task, push_task_to_session, remove_project, save_agent_profile,
+    scan_project, scan_projects, steer_task_session, test_agent_profile, transition_task,
+    update_agent_session, update_task,
 };
 use commands::{recover_claude_inboxes, recover_codex_inboxes, recover_opencode_inboxes};
 use state::AppState;
@@ -56,6 +57,7 @@ pub fn run() {
             add_project,
             initialize_project,
             remove_project,
+            open_project_folder,
             scan_projects,
             scan_project,
             create_task,

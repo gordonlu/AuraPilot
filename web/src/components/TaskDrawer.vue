@@ -12,12 +12,11 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: []; edit: []; delete: []; push: []; transition: [input: TaskTransition] }>()
 
-const transition = reactive({ target: '' as TaskState | '', assigned: '', branch: '', commit: '' })
+const transition = reactive({ target: '' as TaskState | '', assigned: '', branch: '' })
 watch(() => props.task.path, () => {
   transition.target = ''
   transition.assigned = props.task.document.assigned ?? ''
   transition.branch = props.task.document.branch ?? ''
-  transition.commit = props.task.document.commit ?? ''
 }, { immediate: true })
 
 const progress = computed(() => typeof props.task.document.progress === 'number' ? props.task.document.progress : null)
@@ -27,7 +26,6 @@ const confirmTransition = () => {
     target: transition.target,
     assigned: transition.assigned || null,
     branch: transition.branch || null,
-    commit: transition.commit || null,
   })
 }
 </script>
@@ -54,7 +52,7 @@ const confirmTransition = () => {
         <p class="transition-hint">Push 只会发送任务指令，不会自动领取或改变任务状态；需要推进流程时再手动选择。</p>
         <select v-model="transition.target"><option value="">选择目标状态</option><option v-for="state in ['backlog','in-progress','in-review','done']" :key="state" :value="state" :disabled="state === task.state">{{ state }}</option></select>
         <div v-if="transition.target === 'in-progress'" class="transition-fields"><label class="field"><span>负责人</span><input v-model="transition.assigned" placeholder="例如 codex"/></label><label class="field"><span>分支</span><input v-model="transition.branch" placeholder="task/TASK-001"/></label></div>
-        <label v-if="transition.target === 'done'" class="field"><span>Commit</span><input v-model="transition.commit" placeholder="7–40 位小写十六进制"/></label>
+        <p v-if="transition.target === 'done'" class="transition-hint done-hint">完成任务不会创建 Git Commit，也不会自动关联仓库最新提交。已有提交记录仍会保留。</p>
         <button v-if="transition.target" class="button secondary full-width" :disabled="busy" @click="confirmTransition">确认状态变更</button>
         <p v-if="error" class="form-error">{{ error }}</p>
       </section>

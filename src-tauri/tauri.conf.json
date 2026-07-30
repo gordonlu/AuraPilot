@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "AuraPilot",
+        "fullscreen": true,
         "width": 1280,
         "height": 800,
         "minWidth": 960,

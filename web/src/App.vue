@@ -12,6 +12,7 @@ import EmptyState from './components/EmptyState.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
 import TaskFormModal from './components/TaskFormModal.vue'
 import PushTaskModal from './components/PushTaskModal.vue'
+import ProjectsView from './components/ProjectsView.vue'
 import UiIcon from './components/UiIcon.vue'
 import { useProjectsStore } from './stores/projects'
 import { useAgentsStore } from './stores/agents'
@@ -21,7 +22,7 @@ import type { LocatedTask, TaskDraft, TaskTransition } from './types/protocol'
 const projectsStore = useProjectsStore()
 const agentsStore = useAgentsStore()
 const activeProject = ref('all')
-const activeView = ref<'board' | 'blocked'>('board')
+const activeView = ref<'projects' | 'board' | 'blocked'>('projects')
 const search = ref('')
 const theme = ref<Theme>(resolveTheme(localStorage.getItem('aurapilot-theme')))
 const selected = ref<{ projectId: string; taskId: string } | null>(null)
@@ -38,8 +39,9 @@ const allSnapshots = computed(() => Object.values(projectsStore.snapshots))
 const visibleSnapshots = computed(() => activeProject.value === 'all'
   ? allSnapshots.value
   : allSnapshots.value.filter((item) => item.registration.id === activeProject.value))
-const diagnosticCount = computed(() => visibleSnapshots.value.reduce((sum, item) => sum + item.diagnostics.length, 0))
-const taskCount = computed(() => visibleSnapshots.value.reduce((sum, item) => sum + item.tasks.length, 0))
+const contextSnapshots = computed(() => activeView.value === 'projects' ? allSnapshots.value : visibleSnapshots.value)
+const diagnosticCount = computed(() => contextSnapshots.value.reduce((sum, item) => sum + item.diagnostics.length, 0))
+const taskCount = computed(() => contextSnapshots.value.reduce((sum, item) => sum + item.tasks.length, 0))
 const selectedProject = computed(() => selected.value ? projectsStore.snapshots[selected.value.projectId] : null)
 const selectedTask = computed(() => selectedProject.value?.tasks.find((task) => task.document.id === selected.value?.taskId) ?? null)
 const selectedDiagnostics = computed(() => selectedTask.value && selectedProject.value
@@ -51,6 +53,11 @@ const selectTask = (projectId: string, task: LocatedTask) => {
   if (!task.document.id) return
   selected.value = { projectId, taskId: task.document.id }
   actionError.value = null
+}
+const openProjectBoard = (projectId: string) => {
+  activeProject.value = projectId
+  activeView.value = 'board'
+  search.value = ''
 }
 const closeOverlays = () => { modal.value = null; selected.value = null; showDiagnostics.value = false; actionError.value = null }
 const toggleTheme = () => {
@@ -143,6 +150,7 @@ onMounted(async () => {
   if (import.meta.env.DEV) {
     const preview = new URLSearchParams(window.location.search)
     if (preview.get('view') === 'blocked') activeView.value = 'blocked'
+    if (preview.get('view') === 'projects') activeView.value = 'projects'
     if (preview.get('modal') === 'add-project') {
       openAddProject()
       projectPath.value = preview.get('path') ?? ''
@@ -179,9 +187,9 @@ onBeforeUnmount(() => {
     />
     <main class="workspace">
       <header class="app-toolbar">
-        <div class="current-project"><UiIcon name="folder"/><span>{{ activeProject === 'all' ? '所有项目' : visibleSnapshots[0]?.project?.name }}</span><b>{{ taskCount }}</b></div>
-        <label class="search-box"><UiIcon name="search"/><input id="task-search" v-model="search" placeholder="搜索任务或 ID…"/><kbd>/</kbd></label>
-        <div class="view-switch"><button :class="{ active: activeView === 'board' }" @click="activeView = 'board'"><UiIcon name="board"/>看板</button><button :class="{ active: activeView === 'blocked' }" @click="activeView = 'blocked'"><UiIcon name="alert"/>阻塞</button></div>
+        <div class="current-project"><UiIcon name="folder"/><span>{{ activeView === 'projects' ? '项目一览' : activeProject === 'all' ? '所有项目' : visibleSnapshots[0]?.project?.name }}</span><b>{{ activeView === 'projects' ? allSnapshots.length : taskCount }}</b></div>
+        <label class="search-box"><UiIcon name="search"/><input id="task-search" v-model="search" :placeholder="activeView === 'projects' ? '搜索项目名称或路径…' : '搜索任务或 ID…'"/><kbd>/</kbd></label>
+        <div class="view-switch"><button :class="{ active: activeView === 'projects' }" @click="activeView = 'projects'"><UiIcon name="folder"/>项目</button><button :class="{ active: activeView === 'board' }" @click="activeView = 'board'"><UiIcon name="board"/>看板</button><button :class="{ active: activeView === 'blocked' }" @click="activeView = 'blocked'"><UiIcon name="alert"/>阻塞</button></div>
         <button class="button primary" :disabled="!allSnapshots.length" @click="modal = 'create'"><UiIcon name="plus"/>新建任务</button>
       </header>
 
@@ -199,11 +207,12 @@ onBeforeUnmount(() => {
       <div class="main-surface">
         <div v-if="projectsStore.loading" class="loading-state"><span/><p>正在扫描项目协议…</p></div>
         <EmptyState v-else-if="!allSnapshots.length" @add="openAddProject" />
+        <ProjectsView v-else-if="activeView === 'projects'" :snapshots="allSnapshots" :search="search" @open="openProjectBoard" />
         <BoardView v-else-if="activeView === 'board'" :snapshots="visibleSnapshots" :search="search" :selected-key="selectedKey" @open="selectTask" />
         <BlockedView v-else :snapshots="visibleSnapshots" :search="search" @open="selectTask" @back="activeView = 'board'" />
       </div>
 
-      <footer class="status-bar"><span class="live"><i :class="{ warning: projectsStore.error }"/>{{ projectsStore.error ? '同步需要处理' : 'Watcher 实时监控中' }}</span><span>项目 {{ visibleSnapshots.length }}</span><span>任务 {{ taskCount }}</span><span>最后刷新 {{ lastRefresh.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span><button v-if="diagnosticCount" @click="showDiagnostics = true"><UiIcon name="alert" :size="14"/>{{ diagnosticCount }} 条诊断</button></footer>
+      <footer class="status-bar"><span class="live"><i :class="{ warning: projectsStore.error }"/>{{ projectsStore.error ? '同步需要处理' : 'Watcher 实时监控中' }}</span><span>项目 {{ contextSnapshots.length }}</span><span>任务 {{ taskCount }}</span><span>最后刷新 {{ lastRefresh.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span><button v-if="diagnosticCount" @click="showDiagnostics = true"><UiIcon name="alert" :size="14"/>{{ diagnosticCount }} 条诊断</button></footer>
     </main>
 
     <TaskDrawer

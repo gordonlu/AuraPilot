@@ -110,6 +110,10 @@ export const useProjectsStore = defineStore('projects', {
       })
       return typeof selected === 'string' ? selected : null
     },
+    async openFolder(projectId: string) {
+      if (!isTauri()) throw new Error('打开项目文件夹仅在桌面应用中可用')
+      await invokeBackend<void>('open_project_folder', { projectId })
+    },
     async chooseAuraExportPath(defaultName: string) {
       if (!isTauri()) throw new Error('导出仅在桌面应用中可用')
       return save({

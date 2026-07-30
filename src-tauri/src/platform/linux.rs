@@ -58,6 +58,17 @@ pub fn copy_text(text: &str) -> io::Result<()> {
     ))
 }
 
+pub fn open_folder(path: &Path) -> io::Result<Child> {
+    let opener = resolve_on_path("xdg-open")
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "xdg-open is unavailable"))?;
+    Command::new(opener)
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+}
+
 pub fn launch_terminal(prepared: &PreparedLaunch, executable: &Path) -> io::Result<Child> {
     if prepared.prompt_transport == PromptTransport::Stdin {
         return Err(io::Error::new(

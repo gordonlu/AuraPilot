@@ -810,6 +810,22 @@ pub struct ProfileTestOutcome {
 }
 
 #[tauri::command]
+pub async fn open_project_folder(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let project = registered_project(&project_id, &state)?;
+    platform::open_folder(&project.path)
+        .map(|_| ())
+        .map_err(|error| {
+            format!(
+                "failed to open project folder {}: {error}",
+                project.path.display()
+            )
+        })
+}
+
+#[tauri::command]
 pub async fn list_agent_profiles(
     state: State<'_, AppState>,
 ) -> Result<Vec<AgentProfileEntry>, String> {

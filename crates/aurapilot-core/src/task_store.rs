@@ -340,6 +340,38 @@ mod tests {
     }
 
     #[test]
+    fn completing_a_task_does_not_require_a_commit() {
+        let repo = repo();
+        create_task(repo.path(), &CoreConfig::default(), create_input()).unwrap();
+        transition_task(
+            repo.path(),
+            "TASK-001",
+            TransitionTaskInput {
+                target: TaskState::InProgress,
+                assigned: Some("codex".into()),
+                branch: Some("task/phase-3".into()),
+                ..TransitionTaskInput::default()
+            },
+        )
+        .unwrap();
+
+        let done = transition_task(
+            repo.path(),
+            "TASK-001",
+            TransitionTaskInput {
+                target: TaskState::Done,
+                commit: None,
+                ..TransitionTaskInput::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(done.state, TaskState::Done);
+        assert!(done.document.commit.is_none());
+        assert!(done.document.completed.is_some());
+    }
+
+    #[test]
     fn rejects_duplicate_and_traversal_shaped_ids() {
         let repo = repo();
         create_task(repo.path(), &CoreConfig::default(), create_input()).unwrap();

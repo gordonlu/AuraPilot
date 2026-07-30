@@ -277,12 +277,6 @@ impl StatePolicyValidator {
                     "completed",
                     task.document.completed.as_deref(),
                 );
-                required(
-                    &mut out,
-                    profile.missing_required,
-                    "commit",
-                    task.document.commit.as_deref(),
-                );
             }
         }
         for diagnostic in &mut out {
