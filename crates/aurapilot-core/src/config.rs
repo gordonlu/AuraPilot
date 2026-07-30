@@ -23,6 +23,7 @@ pub struct CoreConfig {
     pub max_profile_id_bytes: usize,
     pub sqlite_busy_timeout: Duration,
     pub agent_request_timeout: Duration,
+    pub agent_health_check_timeout: Duration,
     pub agent_status_poll_interval: Duration,
     pub agent_server_start_attempts: usize,
     pub agent_error_body_limit_bytes: usize,
@@ -58,6 +59,7 @@ impl Default for CoreConfig {
             max_profile_id_bytes: 64,
             sqlite_busy_timeout: Duration::from_secs(3),
             agent_request_timeout: Duration::from_secs(15),
+            agent_health_check_timeout: Duration::from_secs(2),
             agent_status_poll_interval: Duration::from_millis(500),
             agent_server_start_attempts: 3,
             agent_error_body_limit_bytes: 4_096,
@@ -97,6 +99,7 @@ mod tests {
         assert_eq!(config.max_profile_id_bytes, 64);
         assert_eq!(config.sqlite_busy_timeout, Duration::from_secs(3));
         assert_eq!(config.agent_request_timeout, Duration::from_secs(15));
+        assert_eq!(config.agent_health_check_timeout, Duration::from_secs(2));
         assert_eq!(
             config.agent_status_poll_interval,
             Duration::from_millis(500)

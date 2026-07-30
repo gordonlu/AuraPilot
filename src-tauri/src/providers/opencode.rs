@@ -28,6 +28,7 @@ impl OpenCodeServer {
         repository: &Path,
         executable: &Path,
         request_timeout: Duration,
+        health_check_timeout: Duration,
         status_poll_interval: Duration,
         start_attempts: usize,
         error_body_limit_bytes: usize,
@@ -64,7 +65,13 @@ impl OpenCodeServer {
                 request_timeout,
                 error_body_limit_bytes,
             )?;
-            match wait_for_health(&mut child, &client, request_timeout, status_poll_interval) {
+            match wait_for_health(
+                &mut child,
+                &client,
+                request_timeout,
+                health_check_timeout,
+                status_poll_interval,
+            ) {
                 Ok(()) => {
                     return Ok(Self {
                         child,
@@ -192,6 +199,20 @@ impl OpenCodeClient {
         self.request(self.http.get(format!("{}{path}", self.base_url)), operation)
     }
 
+    fn get_with_timeout(
+        &self,
+        path: &str,
+        operation: &str,
+        timeout: Duration,
+    ) -> Result<Value, String> {
+        self.request(
+            self.http
+                .get(format!("{}{path}", self.base_url))
+                .timeout(timeout),
+            operation,
+        )
+    }
+
     fn create_session(&self, title: &str) -> Result<String, String> {
         let response = self.request(
             self.http
@@ -311,6 +332,7 @@ fn wait_for_health(
     child: &mut Child,
     client: &OpenCodeClient,
     timeout: Duration,
+    request_timeout: Duration,
     poll_interval: Duration,
 ) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
@@ -322,7 +344,7 @@ fn wait_for_health(
         {
             return Err(format!("OpenCode Server exited with status {status}"));
         }
-        match client.get("/global/health", "health check") {
+        match client.get_with_timeout("/global/health", "health check", request_timeout) {
             Ok(response) if response.get("healthy").and_then(Value::as_bool) == Some(true) => {
                 return Ok(());
             }
@@ -381,6 +403,7 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::sync::mpsc;
+    use tempfile::tempdir;
 
     fn serve_once(status: &str, body: &str) -> (String, mpsc::Receiver<String>) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -501,5 +524,30 @@ mod tests {
         let error = client(base_url).create_session("TASK-001").unwrap_err();
         assert!(error.contains("HTTP 500 Internal Server Error"));
         assert!(error.ends_with('…'));
+    }
+
+    #[test]
+    #[ignore = "requires AURAPILOT_OPENCODE_BIN and starts a real local OpenCode Server"]
+    fn real_server_creates_and_verifies_a_session_without_sending_a_prompt() {
+        let executable = std::env::var_os("AURAPILOT_OPENCODE_BIN")
+            .map(std::path::PathBuf::from)
+            .expect("AURAPILOT_OPENCODE_BIN is required");
+        let repository = tempdir().unwrap();
+        let mut server = OpenCodeServer::start(
+            repository.path(),
+            &executable,
+            Duration::from_secs(15),
+            Duration::from_secs(2),
+            Duration::from_millis(100),
+            3,
+            4_096,
+        )
+        .unwrap();
+        let session_id = server
+            .create_session("AuraPilot real integration verification")
+            .unwrap();
+        server.verify_session(&session_id).unwrap();
+        assert!(!session_id.is_empty());
+        assert!(server.child.try_wait().unwrap().is_none());
     }
 }

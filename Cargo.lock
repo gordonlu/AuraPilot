@@ -124,6 +124,7 @@ name = "aurapilot"
 version = "0.1.0"
 dependencies = [
  "aurapilot-core",
+ "dirs",
  "reqwest",
  "serde",
  "serde_json",
@@ -131,6 +132,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-dialog",
+ "tempfile",
  "uuid",
  "zeroize",
 ]

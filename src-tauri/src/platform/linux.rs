@@ -2,10 +2,26 @@ use super::*;
 use std::env;
 
 pub fn resolve_on_path(command: &str) -> Option<PathBuf> {
-    env::split_paths(&env::var_os("PATH")?).find_map(|directory| {
-        let candidate = directory.join(command);
-        candidate.is_file().then_some(candidate)
+    let path_directories = env::var_os("PATH")
+        .map(|value| env::split_paths(&value).collect::<Vec<_>>())
+        .unwrap_or_default();
+    resolve_in_directories(command, path_directories).or_else(|| {
+        dirs::home_dir()
+            .and_then(|home| resolve_in_directories(command, user_executable_directories(&home)))
     })
+}
+
+pub(super) fn user_executable_directories(home: &Path) -> Vec<PathBuf> {
+    [
+        ".local/bin",
+        "bin",
+        ".cargo/bin",
+        ".npm-global/bin",
+        ".opencode/bin",
+    ]
+    .into_iter()
+    .map(|relative| home.join(relative))
+    .collect()
 }
 
 pub fn copy_text(text: &str) -> io::Result<()> {

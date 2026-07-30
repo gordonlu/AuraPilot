@@ -11,14 +11,23 @@ pub fn resolve_on_path(command: &str) -> Option<PathBuf> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_else(|| vec![".COM".into(), ".EXE".into(), ".BAT".into(), ".CMD".into()]);
-    env::split_paths(&env::var_os("PATH")?).find_map(|directory| {
+    let mut directories = env::var_os("PATH")
+        .map(|value| env::split_paths(&value).collect::<Vec<_>>())
+        .unwrap_or_default();
+    if let Some(home) = dirs::home_dir() {
+        directories.extend([home.join(".cargo/bin"), home.join(".opencode/bin")]);
+    }
+    if let Some(app_data) = env::var_os("APPDATA") {
+        directories.push(PathBuf::from(app_data).join("npm"));
+    }
+    directories.into_iter().find_map(|directory| {
         let direct = directory.join(command);
-        if direct.is_file() {
+        if is_executable_file(&direct) {
             return Some(direct);
         }
         extensions.iter().find_map(|extension| {
             let candidate = directory.join(format!("{command}{extension}"));
-            candidate.is_file().then_some(candidate)
+            is_executable_file(&candidate).then_some(candidate)
         })
     })
 }
