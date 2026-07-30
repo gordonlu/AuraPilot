@@ -4,6 +4,7 @@ import BoardView from './components/BoardView.vue'
 import AddProjectModal from './components/AddProjectModal.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import TaskFormModal from './components/TaskFormModal.vue'
+import TaskDrawer from './components/TaskDrawer.vue'
 import { demoSnapshots } from './demo'
 
 describe('Phase 3 production UI', () => {
@@ -75,5 +76,23 @@ describe('Phase 3 production UI', () => {
     const event = wrapper.emitted('save')?.[0]
     expect(event?.[0]).toBe(snapshots[0].registration.id)
     expect(event?.[1]).toMatchObject({ title: '新的生产任务', accept: ['第一项', '第二项'] })
+  })
+
+  it('marks status transition as optional and keeps Push independent from task state', async () => {
+    const project = demoSnapshots()[0]
+    const task = project.tasks.find((item) => item.state === 'backlog')!
+    const originalState = task.state
+    const wrapper = mount(TaskDrawer, {
+      props: { project, task, diagnostics: [] },
+    })
+
+    expect(wrapper.text()).toContain('状态变更 非必选')
+    expect(wrapper.text()).toContain('Push 只会发送任务指令，不会自动领取或改变任务状态')
+    expect(wrapper.find('.transition-section select').element).toHaveProperty('value', '')
+    await wrapper.find('.drawer-footer .button.primary').trigger('click')
+
+    expect(wrapper.emitted('push')).toHaveLength(1)
+    expect(wrapper.emitted('transition')).toBeUndefined()
+    expect(task.state).toBe(originalState)
   })
 })

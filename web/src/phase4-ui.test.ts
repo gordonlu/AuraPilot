@@ -7,6 +7,41 @@ import { demoSnapshots } from './demo'
 import { useAgentsStore } from './stores/agents'
 
 describe('Phase 4 Push Dispatcher UI', () => {
+  it('keeps silent background execution explicit and identifies its target', async () => {
+    const project = demoSnapshots()[0]
+    const task = project.tasks.find((item) => item.state === 'backlog')!
+    const pinia = createPinia()
+    const agents = useAgentsStore(pinia)
+    vi.spyOn(agents, 'loadSessions').mockImplementation(async () => {
+      agents.sessions = [{
+        id: 'binding-codex', project_id: project.registration.id, profile_id: 'codex', provider: 'codex',
+        external_session_id: '019fa650-0073-7ac2-98d4-c3f4c4e33d09', source: 'managed',
+        verification: 'verified', display_name: 'AuraPilot', working_directory: project.registration.path,
+        state: 'idle', active_turn_id: null, hidden: false, created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(), last_used_at: new Date().toISOString(),
+      }]
+    })
+    const wrapper = mount(PushTaskModal, {
+      props: { project, task },
+      global: { plugins: [pinia] },
+    })
+    await flushPromises()
+
+    expect(wrapper.findAll('.push-mode-switch button')[0].attributes('aria-selected')).toBe('true')
+    expect(wrapper.text()).toContain('新建 Session 会打开一个新的 Agent CLI 窗口')
+    await wrapper.findAll('.push-mode-switch button')[1].trigger('click')
+    expect(wrapper.text()).toContain('后台 Agent 会静默执行')
+    expect(wrapper.text()).toContain('当前 Agent CLI 不会显示执行过程')
+    expect(wrapper.text()).toContain('通常会产生额外 Token 消耗')
+    expect(wrapper.find('button.button.primary').text()).toContain('启动后台 Run')
+    await wrapper.find('button.button.primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('投递目标')
+    expect(wrapper.text()).toContain('AuraPilot')
+    expect(wrapper.text()).toContain('019fa650-007…4e33d09')
+    expect(wrapper.text()).toContain('不会显示在当前 Codex CLI')
+  })
+
   it('offers an explicit Git branch strategy before a new Session without changing task state', async () => {
     const project = demoSnapshots()[0]
     const task = project.tasks.find((item) => item.state === 'backlog')!
@@ -23,8 +58,8 @@ describe('Phase 4 Push Dispatcher UI', () => {
     expect(wrapper.findAll('.agent-option').length).toBeGreaterThanOrEqual(3)
     expect(wrapper.text()).toContain('OpenCode')
     expect(wrapper.text()).toContain('.aurapilot/AGENTS.md')
-    expect(wrapper.text()).toContain('由你选择新 Session 或项目已有 Session')
-    expect(wrapper.text()).toContain('Session 会锁定所选 Profile')
+    expect(wrapper.text()).toContain('选择打开新 CLI 或在后台静默执行')
+    expect(wrapper.text()).toContain('新建 Session 会打开一个新的 Agent CLI 窗口')
     expect(wrapper.text()).toContain('Git 分支策略')
     expect(wrapper.text()).toContain('沿用当前分支')
     expect(wrapper.text()).toContain('与 Agent Session 分支是两个独立概念')

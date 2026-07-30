@@ -1,10 +1,17 @@
-use aurapilot_core::app_paths::registry_path;
+use aurapilot_codex::{
+    CodexAppSession, ensure_managed_daemon, managed_daemon_status, open_managed_tui,
+};
+use aurapilot_core::app_paths::{registry_path, runtime_database_path};
 use aurapilot_core::aura_package::{ExportOptions, export_tasks, import_tasks, preview_import};
 use aurapilot_core::config::CoreConfig;
 use aurapilot_core::initializer::{InitOptions, InitStatus, initialize_repository};
 use aurapilot_core::model::TaskState;
 use aurapilot_core::project_registry::{ProjectRegistry, RegisteredProject, RegistryError};
 use aurapilot_core::project_scanner::scan_project;
+use aurapilot_core::runtime_store::{
+    AgentProvider, NewSessionBinding, RuntimeStore, SessionBinding, SessionBindingSource,
+    SessionRuntimeState, SessionVerification,
+};
 use aurapilot_core::task_store::{CreateTaskInput, create_task};
 use aurapilot_core::validation::SeverityProfile;
 use std::collections::VecDeque;
@@ -24,6 +31,8 @@ Usage:
   aurapilot task create [PATH] --title TITLE [OPTIONS]
   aurapilot task export [PATH] --output FILE [OPTIONS]
   aurapilot task import [PATH] PACKAGE [OPTIONS]
+  aurapilot [--config PATH] codex open [PATH] [--session ID]
+  aurapilot codex status
   aurapilot [--config PATH] status
   aurapilot --help
 
@@ -31,6 +40,7 @@ Commands:
   init      Initialize the .aurapilot protocol in a repository
   add       Register an initialized repository for desktop and CLI use
   task      Create and manage repository tasks
+  codex     Open a Codex CLI connected to AuraPilot's shared App Server
   status    List registered projects and task counts
 
 Options:
@@ -85,6 +95,22 @@ Options:
 
 Without --apply, this command only previews changes and prints the SHA256 to confirm.";
 
+const CODEX_HELP: &str = "Open a managed Codex CLI
+
+Usage:
+  aurapilot [--config PATH] codex open [PATH] [--session ID]
+  aurapilot codex status
+
+Commands:
+  open    Start or reuse the shared Codex App Server and open the project CLI
+  status  Show whether the shared Codex App Server is running
+
+Options:
+  --session ID  Resume a recorded AuraPilot Session binding or Codex Thread ID
+
+When --session is omitted, AuraPilot resumes the project's most recently used
+Codex Session. If none exists, it creates and records one before opening the CLI.";
+
 const DEFAULT_TASK_PRIORITY: &str = "P1";
 const DEFAULT_TASK_TYPE: &str = "feature";
 
@@ -129,9 +155,164 @@ fn run(arguments: Vec<OsString>) -> Result<(), String> {
         "init" => command_init(arguments, &config),
         "add" => command_add(arguments, registry, &config),
         "task" => command_task(arguments, &config),
+        "codex" => command_codex(arguments, registry, &config),
         "status" => command_status(arguments, registry, &config),
         _ => Err(format!("unknown command `{command}`\n\n{HELP}")),
     }
+}
+
+fn command_codex(
+    mut arguments: VecDeque<OsString>,
+    registry_path: PathBuf,
+    config: &CoreConfig,
+) -> Result<(), String> {
+    match arguments.front().and_then(|value| value.to_str()) {
+        Some("-h" | "--help") => {
+            println!("{CODEX_HELP}");
+            Ok(())
+        }
+        Some("open") => {
+            arguments.pop_front();
+            command_codex_open(arguments, registry_path, config)
+        }
+        Some("status") => {
+            arguments.pop_front();
+            if !arguments.is_empty() {
+                return Err("codex status does not accept arguments".into());
+            }
+            let status = managed_daemon_status()?;
+            println!(
+                "Codex App Server: {}\n{}",
+                if status.running { "running" } else { "stopped" },
+                status.detail
+            );
+            Ok(())
+        }
+        Some(command) => Err(format!("unknown codex command `{command}`\n\n{CODEX_HELP}")),
+        None => Err(format!("a codex command is required\n\n{CODEX_HELP}")),
+    }
+}
+
+fn command_codex_open(
+    mut arguments: VecDeque<OsString>,
+    registry_path: PathBuf,
+    config: &CoreConfig,
+) -> Result<(), String> {
+    let mut path = None;
+    let mut requested_session = None;
+    while let Some(argument) = arguments.pop_front() {
+        match argument.to_str() {
+            Some("-h" | "--help") => {
+                println!("{CODEX_HELP}");
+                return Ok(());
+            }
+            Some("--session") => {
+                requested_session = Some(take_utf8_value(&mut arguments, "--session")?)
+            }
+            Some(value) if value.starts_with('-') => {
+                return Err(format!("unknown codex open option `{value}`"));
+            }
+            _ if path.is_none() => path = Some(PathBuf::from(argument)),
+            _ => return Err("codex open accepts only one project path".into()),
+        }
+    }
+
+    let registry =
+        ProjectRegistry::load(registry_path, config.clone()).map_err(|error| error.to_string())?;
+    let requested_path = canonical_repository(path.unwrap_or_else(|| PathBuf::from(".")))?;
+    let project = registered_project_for_path(registry.projects(), &requested_path)?;
+    let mut runtime = RuntimeStore::open(
+        runtime_database_path().map_err(|error| error.to_string())?,
+        config,
+    )
+    .map_err(|error| error.to_string())?;
+    let sessions = runtime
+        .list_sessions(project.id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|session| session.provider == AgentProvider::Codex)
+        .collect::<Vec<_>>();
+    let selected = select_codex_session(&sessions, requested_session.as_deref())?;
+
+    ensure_managed_daemon()?;
+    let (thread_id, binding_id) = if let Some(session) = selected {
+        (session.external_session_id.clone(), session.id)
+    } else {
+        let session = CodexAppSession::create(&project.path, config.agent_request_timeout)?;
+        let thread_id = session.thread_id.clone();
+        let binding = runtime
+            .register_session(NewSessionBinding {
+                project_id: project.id,
+                profile_id: "codex",
+                provider: AgentProvider::Codex,
+                external_session_id: &thread_id,
+                source: SessionBindingSource::Managed,
+                verification: SessionVerification::Verified,
+                display_name: Some("AuraPilot managed Codex CLI"),
+                working_directory: &project.path,
+                state: SessionRuntimeState::NotLoaded,
+            })
+            .map_err(|error| error.to_string())?;
+        (thread_id, binding.id)
+    };
+
+    println!("Opening managed Codex CLI for {}", project.path.display());
+    println!("Session binding: {binding_id}");
+    println!("Codex Thread: {thread_id}");
+    let status = open_managed_tui(&project.path, &thread_id)?;
+    if status.success() || interrupted_exit(&status) {
+        Ok(())
+    } else {
+        Err(format!(
+            "managed Codex CLI exited with {status}; the App Server remains available and retry is safe"
+        ))
+    }
+}
+
+fn registered_project_for_path<'a>(
+    projects: &'a [RegisteredProject],
+    requested_path: &std::path::Path,
+) -> Result<&'a RegisteredProject, String> {
+    projects
+        .iter()
+        .filter(|project| requested_path.starts_with(&project.path))
+        .max_by_key(|project| project.path.components().count())
+        .ok_or_else(|| {
+            format!(
+                "project is not registered with AuraPilot: {}; run `aurapilot add {}` first",
+                requested_path.display(),
+                requested_path.display()
+            )
+        })
+}
+
+fn select_codex_session<'a>(
+    sessions: &'a [SessionBinding],
+    requested: Option<&str>,
+) -> Result<Option<&'a SessionBinding>, String> {
+    let Some(requested) = requested else {
+        return Ok(sessions.first());
+    };
+    sessions
+        .iter()
+        .find(|session| {
+            session.id.to_string() == requested || session.external_session_id == requested
+        })
+        .map(Some)
+        .ok_or_else(|| format!("Codex Session is not recorded for this project: {requested}"))
+}
+
+fn interrupted_exit(status: &std::process::ExitStatus) -> bool {
+    if status.code() == Some(130) {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.signal() == Some(2)
+    }
+    #[cfg(not(unix))]
+    false
 }
 
 fn command_task(mut arguments: VecDeque<OsString>, config: &CoreConfig) -> Result<(), String> {
@@ -540,6 +721,7 @@ fn command_status(
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::Path;
     use tempfile::tempdir;
 
     #[test]
@@ -671,5 +853,62 @@ mod tests {
                 .join(".aurapilot/tasks/backlog/TASK-001.yaml")
                 .is_file()
         );
+    }
+
+    #[test]
+    fn selects_the_deepest_registered_project_for_a_nested_working_directory() {
+        let root = RegisteredProject {
+            id: Uuid::new_v4(),
+            path: PathBuf::from("/workspace/root"),
+            registered_at: String::new(),
+            last_profile_id: None,
+        };
+        let nested = RegisteredProject {
+            id: Uuid::new_v4(),
+            path: PathBuf::from("/workspace/root/nested"),
+            registered_at: String::new(),
+            last_profile_id: None,
+        };
+        let projects = [root, nested.clone()];
+
+        assert_eq!(
+            registered_project_for_path(
+                &projects,
+                Path::new("/workspace/root/nested/src/component")
+            )
+            .unwrap()
+            .id,
+            nested.id
+        );
+    }
+
+    #[test]
+    fn explicit_codex_session_must_belong_to_the_selected_project_list() {
+        let session = SessionBinding {
+            id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+            profile_id: "codex".into(),
+            provider: AgentProvider::Codex,
+            external_session_id: "thread-recorded".into(),
+            source: SessionBindingSource::Managed,
+            verification: SessionVerification::Verified,
+            display_name: None,
+            working_directory: PathBuf::from("/workspace/project"),
+            state: SessionRuntimeState::NotLoaded,
+            active_turn_id: None,
+            hidden: false,
+            created_at: String::new(),
+            updated_at: String::new(),
+            last_used_at: String::new(),
+        };
+
+        assert_eq!(
+            select_codex_session(std::slice::from_ref(&session), Some("thread-recorded"))
+                .unwrap()
+                .unwrap()
+                .id,
+            session.id
+        );
+        assert!(select_codex_session(&[session], Some("thread-other")).is_err());
     }
 }

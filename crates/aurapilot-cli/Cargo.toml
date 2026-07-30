@@ -10,6 +10,7 @@ name = "aurapilot"
 path = "src/main.rs"
 
 [dependencies]
+aurapilot-codex = { path = "../aurapilot-codex" }
 aurapilot-core = { path = "../aurapilot-core" }
 uuid.workspace = true
 zeroize.workspace = true

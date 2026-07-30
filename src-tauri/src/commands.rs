@@ -142,7 +142,7 @@ pub(crate) fn recover_codex_inboxes(app: AppHandle, state: &AppState) -> Result<
                     && let Ok(started_attempt) = store.update(
                         id,
                         PushAttemptStatus::Started,
-                        Some(turn.process_id),
+                        turn.process_id,
                         None,
                         PushDelivery::Process,
                     )
@@ -1249,7 +1249,7 @@ pub async fn push_task_to_session(
                 .update(
                     delivery_attempt_id,
                     PushAttemptStatus::Started,
-                    Some(turn.process_id),
+                    turn.process_id,
                     None,
                     PushDelivery::Process,
                 )
@@ -1312,7 +1312,7 @@ pub async fn push_task_to_session(
         Ok(started) if current_is_delivery => Ok(PushOutcome {
             attempt: started,
             pointer_prompt,
-            message: "已追加到 Codex Session".into(),
+            message: "Codex 后台 Run 已启动".into(),
             session: Some(session),
         }),
         Ok(_) => Ok(PushOutcome {
@@ -2413,7 +2413,7 @@ pub async fn fork_task_session(
                 .update(
                     attempt_id,
                     PushAttemptStatus::Started,
-                    Some(turn.process_id),
+                    turn.process_id,
                     None,
                     PushDelivery::Process,
                 )
@@ -3396,7 +3396,7 @@ async fn push_new_codex_session(
                 .update(
                     attempt_id,
                     PushAttemptStatus::Started,
-                    Some(started_turn.process_id),
+                    started_turn.process_id,
                     None,
                     PushDelivery::Process,
                 )
@@ -4052,7 +4052,7 @@ fn monitor_codex_inbox(
             && let Ok(exited) = store.update(
                 id,
                 PushAttemptStatus::Exited,
-                Some(turn.process_id),
+                turn.process_id,
                 completed.as_ref().err().cloned(),
                 PushDelivery::Process,
             )
@@ -4156,7 +4156,7 @@ fn monitor_codex_inbox(
                     && let Ok(started) = store.update(
                         id,
                         PushAttemptStatus::Started,
-                        Some(started_turn.process_id),
+                        started_turn.process_id,
                         None,
                         PushDelivery::Process,
                     )

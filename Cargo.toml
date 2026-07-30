@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/aurapilot-core", "crates/aurapilot-cli", "src-tauri"]
+members = ["crates/aurapilot-core", "crates/aurapilot-codex", "crates/aurapilot-cli", "src-tauri"]
 resolver = "2"
 
 [workspace.package]
@@ -24,6 +24,7 @@ serde_yaml = { package = "serde_norway", version = "0.9.42" }
 sha2 = "0.10.9"
 tempfile = "3.27.0"
 thiserror = "2.0.19"
+tungstenite = "0.26.2"
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
 zeroize = "1.9.0"
 

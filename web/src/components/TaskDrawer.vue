@@ -50,7 +50,8 @@ const confirmTransition = () => {
       <section v-if="task.document.log.length" class="detail-section"><h2>活动日志</h2><ol class="activity-list"><li v-for="(entry, index) in task.document.log" :key="index"><time>{{ entry.ts }}</time><span>{{ entry.msg }}</span></li></ol></section>
       <section v-if="diagnostics.length" class="detail-section task-diagnostics"><h2>诊断信息 <span>{{ diagnostics.length }}</span></h2><p v-for="item in diagnostics" :key="item.message">{{ item.message }}</p></section>
       <section class="detail-section transition-section">
-        <h2>状态变更</h2>
+        <h2>状态变更 <span class="optional-tag">非必选</span></h2>
+        <p class="transition-hint">Push 只会发送任务指令，不会自动领取或改变任务状态；需要推进流程时再手动选择。</p>
         <select v-model="transition.target"><option value="">选择目标状态</option><option v-for="state in ['backlog','in-progress','in-review','done']" :key="state" :value="state" :disabled="state === task.state">{{ state }}</option></select>
         <div v-if="transition.target === 'in-progress'" class="transition-fields"><label class="field"><span>负责人</span><input v-model="transition.assigned" placeholder="例如 codex"/></label><label class="field"><span>分支</span><input v-model="transition.branch" placeholder="task/TASK-001"/></label></div>
         <label v-if="transition.target === 'done'" class="field"><span>Commit</span><input v-model="transition.commit" placeholder="7–40 位小写十六进制"/></label>

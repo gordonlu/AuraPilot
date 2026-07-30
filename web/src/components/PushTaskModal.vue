@@ -48,8 +48,8 @@ const editChangesManagedId = computed(() => Boolean(selectedBinding.value
   && selectedBinding.value.source !== 'manual'
   && editSessionId.value.trim() !== selectedBinding.value.external_session_id))
 const primaryLabel = computed(() => {
-  if (busy.value) return mode.value === 'existing' ? '正在追加…' : copiesOnly.value ? '正在复制…' : '正在创建并绑定…'
-  if (mode.value === 'existing') return 'Push 到所选 Session'
+  if (busy.value) return mode.value === 'existing' ? '正在启动后台 Run…' : copiesOnly.value ? '正在复制…' : '正在创建并绑定…'
+  if (mode.value === 'existing') return '启动后台 Run'
   if (copiesOnly.value) return '复制任务指令'
   return `新建 Session 并 Push 给 ${selectedEntry.value?.profile.display_name ?? 'Agent'}`
 })
@@ -194,17 +194,17 @@ const controlLiveTurn = async (action: 'steer' | 'interrupt') => {
   <div class="modal-backdrop" @mousedown.self="$emit('close')">
     <section class="task-modal push-modal" role="dialog" aria-modal="true" aria-label="Push 任务">
       <header>
-        <div><span class="modal-mark"><UiIcon name="send"/></span><div><h2>Push {{ task.document.id }}</h2><p>由你选择新 Session 或项目已有 Session</p></div></div>
+        <div><span class="modal-mark"><UiIcon name="send"/></span><div><h2>Push {{ task.document.id }}</h2><p>选择打开新 CLI 或在后台静默执行</p></div></div>
         <button class="icon-button" aria-label="关闭" @click="$emit('close')"><UiIcon name="x"/></button>
       </header>
       <div class="modal-body">
         <div class="push-mode-switch" role="tablist" aria-label="Session 选择">
           <button :class="{ active: mode === 'new' }" role="tab" :aria-selected="mode === 'new'" @click="mode = 'new'">新 Session</button>
-          <button :class="{ active: mode === 'existing' }" role="tab" :aria-selected="mode === 'existing'" @click="mode = 'existing'">项目已有 Session <b>{{ agents.sessions.length }}</b></button>
+          <button :class="{ active: mode === 'existing' }" role="tab" :aria-selected="mode === 'existing'" @click="mode = 'existing'">后台执行（静默） <b>{{ agents.sessions.length }}</b></button>
         </div>
 
         <template v-if="mode === 'new'">
-          <p class="push-notice"><strong>创建新的 Agent Session。</strong>Session 会锁定所选 Profile；“复制任务指令”不会创建 Run 或 Session。</p>
+          <p class="push-notice"><strong>新建 Session 会打开一个新的 Agent CLI 窗口。</strong>Session 会锁定所选 Profile；“复制任务指令”不会创建 Run、Session 或 CLI 窗口。</p>
           <div v-if="agents.loading" class="inline-loading">正在检测 Agent…</div>
           <div v-else class="agent-grid">
             <button v-for="entry in agents.profiles" :key="entry.profile.id" :class="['agent-option', { selected: selectedProfile === entry.profile.id }]" @click="selectedProfile = entry.profile.id">
@@ -232,7 +232,7 @@ const controlLiveTurn = async (action: 'steer' | 'interrupt') => {
         </template>
 
         <template v-else>
-          <p class="push-notice"><strong>继续项目已有 Session。</strong>AuraPilot 无法保证会话上下文仍适合当前任务，请检查 Profile、项目和 Session ID。默认在安全边界追加；此模式不会切换 Git 分支。</p>
+          <p class="push-notice"><strong>后台 Agent 会静默执行，当前 Agent CLI 不会显示执行过程。</strong>它会通过独立连接恢复所选 Session 的已保存上下文，通常会产生额外 Token 消耗。AuraPilot 无法保证会话上下文仍适合当前任务，请检查 Profile、项目和 Session ID；此模式不会切换 Git 分支。</p>
           <div v-if="agents.sessions.length" class="session-list">
             <button v-for="session in agents.sessions" :key="session.id" :class="['session-option', { selected: selectedSession === session.id }]" @click="selectedSession = session.id">
               <span :class="['session-state', session.state]"/>
@@ -272,7 +272,15 @@ const controlLiveTurn = async (action: 'steer' | 'interrupt') => {
         </template>
 
         <section v-if="preview" class="prompt-preview"><div><strong>Pointer Prompt</strong><span>{{ preview.text.length }} 字符</span></div><pre>{{ preview.text }}</pre></section>
-        <p v-if="outcome" :class="['push-result', outcome.attempt.status === 'failed_to_start' ? 'warning' : 'success']" role="status" aria-live="polite">{{ outcome.message }}</p>
+        <section v-if="outcome" :class="['push-result', outcome.attempt.status === 'failed_to_start' ? 'warning' : 'success']" role="status" aria-live="polite">
+          <strong>{{ outcome.message }}</strong>
+          <div v-if="outcome.session" class="push-result-target">
+            <span>投递目标</span>
+            <b>{{ outcome.session.display_name || `${outcome.session.profile_id} Session` }}</b>
+            <code :title="outcome.session.external_session_id">{{ shortId(outcome.session.external_session_id) }}</code>
+          </div>
+          <small v-if="mode === 'existing' && outcome.session?.provider === 'codex'">这是由 AuraPilot 独立连接创建的后台 Turn，不会显示在当前 Codex CLI。请按上方 Thread ID 核对，并在 AuraPilot 中查看任务活动日志。</small>
+        </section>
         <p v-if="branchResult" :class="['push-result', branchResultSuccess ? 'success' : 'warning']" role="status">{{ branchResult }}</p>
         <p v-if="error || agents.error" class="form-error" role="alert" aria-live="assertive">{{ error || agents.error }}</p>
       </div>
