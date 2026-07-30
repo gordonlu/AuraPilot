@@ -14,6 +14,11 @@ pub struct OpenCodeServer {
 }
 
 #[derive(Clone)]
+pub struct OpenCodeLiveHandle {
+    client: OpenCodeClient,
+}
+
+#[derive(Clone)]
 struct OpenCodeClient {
     http: Client,
     base_url: String,
@@ -96,6 +101,12 @@ impl OpenCodeServer {
         self.child.id()
     }
 
+    pub fn live_handle(&self) -> OpenCodeLiveHandle {
+        OpenCodeLiveHandle {
+            client: self.client.clone(),
+        }
+    }
+
     pub fn create_session(&self, title: &str) -> Result<String, String> {
         self.client.create_session(title)
     }
@@ -106,6 +117,28 @@ impl OpenCodeServer {
 
     pub fn session_is_idle(&self, session_id: &str) -> Result<bool, String> {
         self.client.session_is_idle(session_id)
+    }
+
+    pub fn wait_until_idle(&mut self, session_id: &str) -> Result<(), String> {
+        loop {
+            if let Some(status) = self
+                .child
+                .try_wait()
+                .map_err(|error| format!("failed to inspect OpenCode Server: {error}"))?
+            {
+                return Err(format!(
+                    "OpenCode Server exited with status {status} while waiting for Session {session_id}"
+                ));
+            }
+            if self.client.session_is_idle(session_id)? {
+                return Ok(());
+            }
+            std::thread::sleep(self.status_poll_interval);
+        }
+    }
+
+    pub fn fork_session(&self, session_id: &str) -> Result<String, String> {
+        self.client.fork_session(session_id)
     }
 
     pub fn prompt_async(
@@ -142,6 +175,12 @@ impl OpenCodeServer {
                 }
             }
         }
+    }
+}
+
+impl OpenCodeLiveHandle {
+    pub fn abort_session(&self, session_id: &str) -> Result<(), String> {
+        self.client.abort_session(session_id)
     }
 }
 
@@ -246,10 +285,20 @@ impl OpenCodeClient {
     fn session_is_idle(&self, session_id: &str) -> Result<bool, String> {
         validate_path_id(session_id)?;
         let statuses = self.get("/session/status", "read Session status")?;
-        let status = statuses
-            .get(session_id)
-            .ok_or_else(|| format!("OpenCode Session status was unavailable for {session_id}"))?;
-        Ok(status_type(status) == Some("idle"))
+        let Some(status) = statuses.get(session_id) else {
+            // OpenCode only lists non-idle Sessions in this projection.
+            return Ok(true);
+        };
+        match status_type(status) {
+            Some("idle") => Ok(true),
+            Some("busy" | "retry") => Ok(false),
+            Some(other) => Err(format!(
+                "OpenCode Session {session_id} returned unknown status {other}"
+            )),
+            None => Err(format!(
+                "OpenCode Session {session_id} status did not contain a type"
+            )),
+        }
     }
 
     fn prompt_async(&self, session_id: &str, message_id: &str, prompt: &str) -> Result<(), String> {
@@ -267,6 +316,31 @@ impl OpenCodeClient {
             "send asynchronous prompt",
         )?;
         Ok(())
+    }
+
+    fn abort_session(&self, session_id: &str) -> Result<(), String> {
+        validate_path_id(session_id)?;
+        self.request(
+            self.http
+                .post(format!("{}/session/{session_id}/abort", self.base_url)),
+            "abort Session",
+        )?;
+        Ok(())
+    }
+
+    fn fork_session(&self, session_id: &str) -> Result<String, String> {
+        validate_path_id(session_id)?;
+        let response = self.request(
+            self.http
+                .post(format!("{}/session/{session_id}/fork", self.base_url)),
+            "fork Session",
+        )?;
+        response
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| "OpenCode fork Session response did not contain id".to_owned())
     }
 
     fn message_completion(
@@ -493,6 +567,42 @@ mod tests {
     }
 
     #[test]
+    fn an_unlisted_session_is_idle_and_busy_sessions_are_not() {
+        let (base_url, _) = serve_once("200 OK", "{}");
+        assert!(client(base_url).session_is_idle("ses_idle").unwrap());
+
+        let (base_url, _) = serve_once("200 OK", r#"{"ses_busy":{"type":"busy"}}"#);
+        assert!(!client(base_url).session_is_idle("ses_busy").unwrap());
+    }
+
+    #[test]
+    fn aborts_the_selected_session() {
+        let (base_url, request) = serve_once("204 No Content", "");
+        client(base_url).abort_session("ses_123").unwrap();
+        assert!(
+            request
+                .recv()
+                .unwrap()
+                .starts_with("POST /session/ses_123/abort HTTP/1.1")
+        );
+    }
+
+    #[test]
+    fn forks_the_selected_session_and_reads_the_new_id() {
+        let (base_url, request) = serve_once("200 OK", r#"{"id":"ses_fork"}"#);
+        assert_eq!(
+            client(base_url).fork_session("ses_123").unwrap(),
+            "ses_fork"
+        );
+        assert!(
+            request
+                .recv()
+                .unwrap()
+                .starts_with("POST /session/ses_123/fork HTTP/1.1")
+        );
+    }
+
+    #[test]
     fn completion_parser_distinguishes_pending_success_and_failure() {
         let pending = json!([]);
         assert_eq!(
@@ -547,7 +657,15 @@ mod tests {
             .create_session("AuraPilot real integration verification")
             .unwrap();
         server.verify_session(&session_id).unwrap();
+        assert!(server.session_is_idle(&session_id).unwrap());
+        let forked_session_id = server.fork_session(&session_id).unwrap();
+        server.verify_session(&forked_session_id).unwrap();
+        server
+            .live_handle()
+            .abort_session(&forked_session_id)
+            .unwrap();
         assert!(!session_id.is_empty());
+        assert_ne!(forked_session_id, session_id);
         assert!(server.child.try_wait().unwrap().is_none());
     }
 }

@@ -17,6 +17,10 @@ const error = ref<string | null>(null)
 const showManual = ref(false)
 const manualSessionId = ref('')
 const manualName = ref('')
+const showEdit = ref(false)
+const editSessionId = ref('')
+const editName = ref('')
+const confirmReplacement = ref(false)
 const branchStrategy = ref<'current' | 'new'>('current')
 const branchName = ref(`task/${props.task.document.id ?? 'new-task'}`)
 const gitStatus = ref<GitWorkspaceStatus | null>(null)
@@ -26,14 +30,23 @@ const branchResultSuccess = ref(false)
 
 const selectedEntry = computed(() => agents.profiles.find((entry) => entry.profile.id === selectedProfile.value))
 const selectedBinding = computed(() => agents.sessions.find((session) => session.id === selectedSession.value))
-const canForkSession = computed(() => selectedBinding.value?.provider === 'codex'
-  && ['idle', 'not_loaded'].includes(selectedBinding.value.state))
-const canControlLiveTurn = computed(() => selectedBinding.value?.provider === 'codex'
+const canForkSession = computed(() => ['codex', 'open_code'].includes(selectedBinding.value?.provider ?? '')
+  && ['idle', 'not_loaded'].includes(selectedBinding.value?.state ?? ''))
+const canSteerLiveTurn = computed(() => selectedBinding.value?.provider === 'codex'
   && selectedBinding.value.state === 'running' && Boolean(selectedBinding.value.active_turn_id))
+const canInterruptSession = computed(() => selectedBinding.value?.state === 'running'
+  && ((selectedBinding.value.provider === 'open_code' && Boolean(selectedBinding.value.active_turn_id))
+    || (selectedBinding.value.provider === 'codex' && Boolean(selectedBinding.value.active_turn_id))))
 const copiesOnly = computed(() => selectedEntry.value?.profile.launch_mode === 'clipboard_only')
 const hasActiveProjectSession = computed(() => agents.sessions.some((session) => [
   'starting', 'running', 'waiting_approval', 'interrupting',
 ].includes(session.state)))
+const selectedSessionIsActive = computed(() => selectedBinding.value ? [
+  'starting', 'running', 'waiting_approval', 'interrupting',
+].includes(selectedBinding.value.state) : false)
+const editChangesManagedId = computed(() => Boolean(selectedBinding.value
+  && selectedBinding.value.source !== 'manual'
+  && editSessionId.value.trim() !== selectedBinding.value.external_session_id))
 const primaryLabel = computed(() => {
   if (busy.value) return mode.value === 'existing' ? '正在追加…' : copiesOnly.value ? '正在复制…' : '正在创建并绑定…'
   if (mode.value === 'existing') return 'Push 到所选 Session'
@@ -78,6 +91,32 @@ const bindManual = async () => {
     mode.value = 'existing'; showManual.value = false
     manualSessionId.value = ''; manualName.value = ''
   } catch (caught) { error.value = `绑定 Session 失败：${String(caught)}` }
+  finally { busy.value = false }
+}
+
+const beginEdit = () => {
+  if (!selectedBinding.value || selectedSessionIsActive.value) return
+  editSessionId.value = selectedBinding.value.external_session_id
+  editName.value = selectedBinding.value.display_name ?? ''
+  confirmReplacement.value = false
+  showEdit.value = true
+  showManual.value = false
+}
+
+const saveEdit = async () => {
+  if (!selectedBinding.value || !editSessionId.value.trim() || selectedSessionIsActive.value) return
+  busy.value = true; error.value = null
+  try {
+    const session = await agents.updateSession(
+      props.project.registration.id,
+      selectedBinding.value.id,
+      editSessionId.value.trim(),
+      editName.value,
+      confirmReplacement.value,
+    )
+    selectedSession.value = session.id
+    showEdit.value = false
+  } catch (caught) { error.value = `更新 Session 失败：${String(caught)}` }
   finally { busy.value = false }
 }
 
@@ -138,7 +177,8 @@ const forkSession = async () => {
 }
 
 const controlLiveTurn = async (action: 'steer' | 'interrupt') => {
-  if (!props.task.document.id || !selectedBinding.value || !canControlLiveTurn.value) return
+  if (!props.task.document.id || !selectedBinding.value
+    || (action === 'steer' ? !canSteerLiveTurn.value : !canInterruptSession.value)) return
   busy.value = true; error.value = null; outcome.value = null
   try {
     outcome.value = action === 'steer'
@@ -202,18 +242,32 @@ const controlLiveTurn = async (action: 'steer' | 'interrupt') => {
             </button>
           </div>
           <div v-else class="session-empty"><strong>这个项目还没有已记录的 Session</strong><span>可以先新建 Session，或手动绑定已有 ID。</span></div>
-          <div v-if="selectedBinding?.provider === 'codex'" class="session-actions">
-            <button v-if="canControlLiveTurn" class="button secondary" :disabled="busy" @click="controlLiveTurn('steer')"><UiIcon name="send" :size="14"/>追加到当前 Turn</button>
-            <button v-if="canControlLiveTurn" class="button secondary" :disabled="busy" @click="controlLiveTurn('interrupt')"><UiIcon name="x" :size="14"/>中断后追加</button>
+          <div v-if="selectedBinding && ['codex', 'open_code'].includes(selectedBinding.provider)" class="session-actions">
+            <button v-if="canSteerLiveTurn" class="button secondary" :disabled="busy" @click="controlLiveTurn('steer')"><UiIcon name="send" :size="14"/>追加到当前 Turn</button>
+            <button v-if="canInterruptSession" class="button secondary" :disabled="busy" @click="controlLiveTurn('interrupt')"><UiIcon name="x" :size="14"/>中断后追加</button>
             <button class="button secondary" :disabled="busy || !canForkSession" @click="forkSession"><UiIcon name="git-branch" :size="14"/>创建 Session 分支并 Push</button>
-            <small>{{ canControlLiveTurn ? '默认 Push 仍会安全排队；以上操作只在你明确选择时执行。' : canForkSession ? '复制 Codex 会话历史并生成新的 Session ID；这不会创建 Git 分支。' : '当前 Session 不可执行这些显式操作。' }}</small>
+            <small>{{ canSteerLiveTurn || canInterruptSession ? '默认 Push 仍会安全排队；中断或 Steer 只在你明确选择时执行。' : canForkSession ? `复制 ${selectedBinding.provider === 'codex' ? 'Codex' : 'OpenCode'} 会话历史并生成新的 Session ID；这不会创建 Git 分支。` : '当前 Session 不可执行这些显式操作。' }}</small>
           </div>
-          <button class="button secondary manual-bind-toggle" @click="showManual = !showManual"><UiIcon name="plus" :size="14"/>手动绑定 Session ID</button>
+          <div class="session-binding-actions">
+            <button class="button secondary manual-bind-toggle" @click="showManual = !showManual; showEdit = false"><UiIcon name="plus" :size="14"/>手动绑定 Session ID</button>
+            <button class="button secondary" :disabled="!selectedBinding || selectedSessionIsActive" @click="beginEdit"><UiIcon name="edit" :size="14"/>编辑所选绑定</button>
+          </div>
+          <p v-if="selectedBinding && selectedSessionIsActive" class="branch-warning"><UiIcon name="alert" :size="14"/>运行中的 Session 不能修改名称或 ID。</p>
           <form v-if="showManual" class="manual-session-form" @submit.prevent="bindManual">
             <label class="field"><span>Profile</span><select v-model="selectedProfile"><option v-for="entry in agents.profiles.filter((item) => item.profile.launch_mode !== 'clipboard_only')" :key="entry.profile.id" :value="entry.profile.id">{{ entry.profile.display_name }}</option></select></label>
             <label class="field"><span>Session ID</span><input v-model="manualSessionId" required placeholder="例如 thr_… 或 UUID"/></label>
             <label class="field"><span>显示名称（可选）</span><input v-model="manualName" placeholder="例如 TASK-001 修复会话"/></label>
             <button class="button secondary" :disabled="busy || !manualSessionId.trim() || !selectedProfile">保存为未验证绑定</button>
+          </form>
+          <form v-if="showEdit && selectedBinding" class="manual-session-form" @submit.prevent="saveEdit">
+            <label class="field"><span>Profile（不可更换）</span><input :value="selectedBinding.profile_id" disabled/></label>
+            <label class="field"><span>Session ID</span><input v-model="editSessionId" required autocomplete="off"/></label>
+            <label class="field"><span>显示名称（可选）</span><input v-model="editName" placeholder="例如 TASK-001 修复会话"/></label>
+            <label v-if="editChangesManagedId" class="confirm-session-replacement"><input v-model="confirmReplacement" type="checkbox"/><span>我确认替换 AuraPilot 自动记录的 Session ID；原 Provider Session 不会被删除。</span></label>
+            <div class="session-edit-footer">
+              <button type="button" class="button secondary" @click="showEdit = false">取消</button>
+              <button class="button secondary" :disabled="busy || !editSessionId.trim() || (editChangesManagedId && !confirmReplacement)">保存并重新验证</button>
+            </div>
           </form>
         </template>
 

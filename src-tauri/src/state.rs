@@ -1,4 +1,5 @@
 use crate::providers::codex::CodexLiveHandle;
+use crate::providers::opencode::OpenCodeLiveHandle;
 use aurapilot_core::app_paths::{
     profile_path, push_attempt_path, registry_path, runtime_database_path,
 };
@@ -19,6 +20,7 @@ pub struct AppState {
     pub push_attempts: Arc<Mutex<PushAttemptStore>>,
     pub runtime: Arc<Mutex<RuntimeStore>>,
     pub codex_sessions: Arc<Mutex<HashMap<Uuid, CodexLiveHandle>>>,
+    pub opencode_sessions: Arc<Mutex<HashMap<Uuid, OpenCodeLiveHandle>>>,
     pub watchers: Mutex<ProjectWatchService>,
 }
 
@@ -58,6 +60,7 @@ impl AppState {
             push_attempts: Arc::new(Mutex::new(push_attempts)),
             runtime: Arc::new(Mutex::new(runtime)),
             codex_sessions: Arc::new(Mutex::new(HashMap::new())),
+            opencode_sessions: Arc::new(Mutex::new(HashMap::new())),
             watchers: Mutex::new(watchers),
         })
     }

@@ -4,6 +4,7 @@ import { defineStore } from 'pinia'
 import { invokeBackend } from '../backend'
 import type {
   AgentLaunchProfile,
+  AgentProvider,
   AgentProfileEntry,
   AgentSessionBinding,
   GitWorkspaceStatus,
@@ -11,6 +12,13 @@ import type {
   PushOutcome,
   PushAttempt,
 } from '../types/protocol'
+
+const demoProvider = (profileId: string): AgentProvider => {
+  if (profileId === 'codex') return 'codex'
+  if (profileId === 'claude-code') return 'claude_code'
+  if (profileId === 'opencode') return 'open_code'
+  return 'other'
+}
 
 export const PUSH_ATTEMPT_EVENT = 'aurapilot://push-attempt'
 
@@ -114,7 +122,7 @@ export const useAgentsStore = defineStore('agents', {
         })
         : {
           id: crypto.randomUUID(), project_id: projectId, profile_id: profileId,
-          provider: profileId === 'codex' ? 'codex' as const : 'other' as const,
+          provider: demoProvider(profileId),
           external_session_id: externalSessionId, source: 'manual' as const,
           verification: 'unverified' as const, display_name: displayName || null,
           working_directory: '/demo/repository', state: 'not_loaded' as const,
@@ -124,6 +132,32 @@ export const useAgentsStore = defineStore('agents', {
       const index = this.sessions.findIndex((item) => item.id === session.id)
       if (index >= 0) this.sessions[index] = session
       else this.sessions.unshift(session)
+      return session
+    },
+    async updateSession(
+      projectId: string,
+      sessionId: string,
+      externalSessionId: string,
+      displayName: string,
+      confirmReplacement: boolean,
+    ) {
+      const current = this.sessions.find((item) => item.id === sessionId)
+      if (!current) throw new Error(`Session binding not found: ${sessionId}`)
+      const session = isTauri()
+        ? await invokeBackend<AgentSessionBinding>('update_agent_session', {
+          projectId, sessionId, externalSessionId,
+          displayName: displayName.trim() || null,
+          confirmReplacement,
+        })
+        : {
+          ...current,
+          external_session_id: externalSessionId.trim(),
+          display_name: displayName.trim() || null,
+          verification: 'unverified' as const,
+          updated_at: new Date().toISOString(),
+        }
+      const index = this.sessions.findIndex((item) => item.id === session.id)
+      if (index >= 0) this.sessions[index] = session
       return session
     },
     async gitStatus(projectId: string): Promise<GitWorkspaceStatus> {
@@ -198,7 +232,7 @@ export const useAgentsStore = defineStore('agents', {
       } : null
       return {
         pointer_prompt, session,
-        message: '已创建 Codex Session 分支并接收任务（演示）',
+        message: `已创建 ${source?.provider === 'open_code' ? 'OpenCode' : 'Codex'} Session 分支并接收任务（演示）`,
         attempt: {
           id: crypto.randomUUID(), task_id: taskId, project_id: projectId,
           agent_profile_id: source?.profile_id ?? 'codex', created_at: new Date().toISOString(),
@@ -226,7 +260,9 @@ export const useAgentsStore = defineStore('agents', {
       const session = source ? { ...source, state: 'interrupting' as const } : null
       return {
         pointer_prompt, session,
-        message: '已请求中断；将在 turn/completed 后按 FIFO 追加到原 Session（演示）',
+        message: session?.provider === 'open_code'
+          ? '已请求中断 OpenCode Session；将在确认空闲后按 FIFO 追加（演示）'
+          : '已请求中断；将在 turn/completed 后按 FIFO 追加到原 Session（演示）',
         attempt: {
           id: crypto.randomUUID(), task_id: taskId, project_id: projectId,
           agent_profile_id: session?.profile_id ?? 'codex', created_at: new Date().toISOString(),

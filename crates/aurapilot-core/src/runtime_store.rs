@@ -335,6 +335,8 @@ pub enum RuntimeStoreError {
     ProjectMismatch { expected: Uuid, actual: Uuid },
     #[error("session profile is {actual}, not {expected}; create a new session to change profile")]
     ProfileMismatch { expected: String, actual: String },
+    #[error("session {0} is active and cannot be edited")]
+    SessionActive(Uuid),
     #[error("existing-session push requires a target session")]
     SessionRequired,
     #[error("new-session push requires a selected profile")]
@@ -519,6 +521,48 @@ impl RuntimeStore {
             )
             .optional()
             .map_err(Into::into)
+    }
+
+    pub fn update_session_binding(
+        &mut self,
+        id: Uuid,
+        project_id: Uuid,
+        external_session_id: &str,
+        display_name: Option<&str>,
+        verification: SessionVerification,
+    ) -> Result<SessionBinding, RuntimeStoreError> {
+        let session = self
+            .session(id)?
+            .ok_or(RuntimeStoreError::SessionNotFound(id))?;
+        if session.project_id != project_id {
+            return Err(RuntimeStoreError::ProjectMismatch {
+                expected: project_id,
+                actual: session.project_id,
+            });
+        }
+        if matches!(
+            session.state,
+            SessionRuntimeState::Starting
+                | SessionRuntimeState::Running
+                | SessionRuntimeState::WaitingApproval
+                | SessionRuntimeState::Interrupting
+        ) {
+            return Err(RuntimeStoreError::SessionActive(id));
+        }
+        self.connection.execute(
+            "UPDATE session_bindings SET external_session_id = ?2, display_name = ?3,
+                verification_status = ?4, updated_at = ?5
+             WHERE id = ?1",
+            params![
+                id.to_string(),
+                external_session_id,
+                display_name,
+                verification.as_str(),
+                now(),
+            ],
+        )?;
+        self.session(id)?
+            .ok_or(RuntimeStoreError::SessionNotFound(id))
     }
 
     pub fn create_run(
@@ -786,6 +830,34 @@ impl RuntimeStore {
                 error,
                 i64::from(retryable),
             ],
+        )?;
+        tx.commit()?;
+        self.push(push_id)?
+            .ok_or_else(|| RuntimeStoreError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+    }
+
+    pub fn requeue_delivery(
+        &mut self,
+        push_id: Uuid,
+        reason: &str,
+    ) -> Result<PushRecord, RuntimeStoreError> {
+        let tx = self.connection.transaction()?;
+        let timestamp = now();
+        let changed = tx.execute(
+            "UPDATE push_requests SET status = 'queued', last_error = ?2, updated_at = ?3
+             WHERE id = ?1 AND status = 'delivering'",
+            params![push_id.to_string(), reason, timestamp],
+        )?;
+        if changed == 0 {
+            return Err(RuntimeStoreError::PushNotQueued(push_id));
+        }
+        tx.execute(
+            "UPDATE push_delivery_attempts SET finished_at = ?2, error = ?3, retryable = 1
+             WHERE id = (
+                SELECT id FROM push_delivery_attempts WHERE push_id = ?1
+                ORDER BY attempt_number DESC LIMIT 1
+             )",
+            params![push_id.to_string(), timestamp, reason],
         )?;
         tx.commit()?;
         self.push(push_id)?
@@ -1187,6 +1259,69 @@ mod tests {
     }
 
     #[test]
+    fn idle_session_binding_can_be_renamed_and_repointed_without_changing_profile() {
+        let mut store = store();
+        let project = Uuid::new_v4();
+        let binding = store
+            .register_session(NewSessionBinding {
+                project_id: project,
+                profile_id: "opencode-review",
+                provider: AgentProvider::OpenCode,
+                external_session_id: "ses_old",
+                source: SessionBindingSource::Manual,
+                verification: SessionVerification::Unverified,
+                display_name: Some("Old"),
+                working_directory: Path::new("/repo"),
+                state: SessionRuntimeState::NotLoaded,
+            })
+            .unwrap();
+
+        let updated = store
+            .update_session_binding(
+                binding.id,
+                project,
+                "ses_new",
+                Some("New"),
+                SessionVerification::Verified,
+            )
+            .unwrap();
+        assert_eq!(updated.profile_id, "opencode-review");
+        assert_eq!(updated.external_session_id, "ses_new");
+        assert_eq!(updated.display_name.as_deref(), Some("New"));
+        assert_eq!(updated.verification, SessionVerification::Verified);
+    }
+
+    #[test]
+    fn active_session_binding_cannot_be_edited() {
+        let mut store = store();
+        let project = Uuid::new_v4();
+        let binding = store
+            .register_session(NewSessionBinding {
+                project_id: project,
+                profile_id: "codex",
+                provider: AgentProvider::Codex,
+                external_session_id: "thr_active",
+                source: SessionBindingSource::Managed,
+                verification: SessionVerification::Verified,
+                display_name: None,
+                working_directory: Path::new("/repo"),
+                state: SessionRuntimeState::Running,
+            })
+            .unwrap();
+
+        assert!(matches!(
+            store.update_session_binding(
+                binding.id,
+                project,
+                "thr_changed",
+                None,
+                SessionVerification::Unverified,
+            ),
+            Err(RuntimeStoreError::SessionActive(id)) if id == binding.id
+        ));
+    }
+
+    #[test]
     fn push_idempotency_and_crash_ambiguity_are_explicit() {
         let mut store = store();
         let project = Uuid::new_v4();
@@ -1222,6 +1357,51 @@ mod tests {
         assert_eq!(
             store.push(first.id).unwrap().unwrap().status,
             PushStatus::DeliveryUnknown
+        );
+    }
+
+    #[test]
+    fn provider_busy_requeues_a_claimed_push_without_losing_fifo_position() {
+        let mut store = store();
+        let project = Uuid::new_v4();
+        let session = store
+            .register_session(NewSessionBinding {
+                project_id: project,
+                profile_id: "opencode",
+                provider: AgentProvider::OpenCode,
+                external_session_id: "ses_busy",
+                source: SessionBindingSource::Managed,
+                verification: SessionVerification::Verified,
+                display_name: None,
+                working_directory: Path::new("/repo"),
+                state: SessionRuntimeState::NotLoaded,
+            })
+            .unwrap();
+        let first = store
+            .enqueue_push(NewPush {
+                project_id: project,
+                task_id: "TASK-001",
+                selected_profile_id: None,
+                target_run_id: None,
+                target_session_id: Some(session.id),
+                mode: PushMode::ExistingSession,
+                delivery: PushDeliveryPolicy::SafeBoundary,
+                content: "first",
+                idempotency_key: "busy-1",
+            })
+            .unwrap();
+        let claimed = store.claim_next_queued_push(session.id).unwrap().unwrap();
+        assert_eq!(claimed.id, first.id);
+        let queued = store.requeue_delivery(first.id, "provider busy").unwrap();
+        assert_eq!(queued.status, PushStatus::Queued);
+        assert_eq!(queued.last_error.as_deref(), Some("provider busy"));
+        assert_eq!(
+            store
+                .claim_next_queued_push(session.id)
+                .unwrap()
+                .unwrap()
+                .id,
+            first.id
         );
     }
 

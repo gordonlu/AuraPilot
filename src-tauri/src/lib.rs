@@ -9,7 +9,7 @@ use commands::{
     initialize_project, interrupt_task_session, list_agent_profiles, list_agent_sessions,
     list_projects, list_push_attempts, preview_aura_import, preview_pointer_prompt, push_task,
     push_task_to_session, remove_project, save_agent_profile, scan_project, scan_projects,
-    steer_task_session, test_agent_profile, transition_task, update_task,
+    steer_task_session, test_agent_profile, transition_task, update_agent_session, update_task,
 };
 use commands::{recover_claude_inboxes, recover_codex_inboxes, recover_opencode_inboxes};
 use state::AppState;
@@ -74,6 +74,7 @@ pub fn run() {
             list_push_attempts,
             list_agent_sessions,
             bind_agent_session,
+            update_agent_session,
             push_task_to_session,
             steer_task_session,
             interrupt_task_session,

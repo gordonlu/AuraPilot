@@ -1,6 +1,6 @@
 use crate::providers::claude::ClaudeProcess;
 use crate::providers::codex::{CodexAppSession, CodexLiveHandle, StartedTurn};
-use crate::providers::opencode::OpenCodeServer;
+use crate::providers::opencode::{OpenCodeLiveHandle, OpenCodeServer};
 use crate::state::AppState;
 use crate::{PUSH_ATTEMPT_EVENT, platform};
 use aurapilot_core::agent_profile::{
@@ -61,9 +61,14 @@ const OPENCODE_CAPABILITIES: SessionCapabilities = SessionCapabilities {
     resumable: true,
     live_input: false,
     same_turn_steer: false,
-    interruptible: false,
-    forkable: false,
+    interruptible: true,
+    forkable: true,
 };
+
+enum OpenCodeDeliveryStart {
+    Delivered(PushAttempt),
+    Queued,
+}
 
 pub(crate) fn recover_codex_inboxes(app: AppHandle, state: &AppState) -> Result<usize, String> {
     let sessions = state
@@ -397,6 +402,7 @@ pub(crate) fn recover_opencode_inboxes(app: AppHandle, state: &AppState) -> Resu
         started += 1;
         let runtime = state.runtime.clone();
         let attempts = state.push_attempts.clone();
+        let live_sessions = state.opencode_sessions.clone();
         let app_for_worker = app.clone();
         let config = state.config.clone();
         std::thread::spawn(move || {
@@ -414,7 +420,29 @@ pub(crate) fn recover_opencode_inboxes(app: AppHandle, state: &AppState) -> Resu
                 )?;
                 server.verify_session(&session.external_session_id)?;
                 if !server.session_is_idle(&session.external_session_id)? {
-                    return Err("OpenCode Session is busy; queued Push was not sent".into());
+                    {
+                        let mut store = runtime.lock().map_err(|error| error.to_string())?;
+                        store
+                            .requeue_delivery(
+                                next.id,
+                                "OpenCode Session is busy during recovery; waiting for idle",
+                            )
+                            .map_err(|error| error.to_string())?;
+                        store
+                            .update_session_runtime(session.id, SessionRuntimeState::Running, None)
+                            .map_err(|error| error.to_string())?;
+                    }
+                    wait_for_opencode_idle_and_drain(
+                        server,
+                        OpenCodeMonitorContext {
+                            runtime: runtime.clone(),
+                            attempts: attempts.clone(),
+                            live_sessions: live_sessions.clone(),
+                            app: app_for_worker.clone(),
+                            session: session.clone(),
+                        },
+                    );
+                    return Ok(());
                 }
                 let process_id = server.process_id();
                 let message_id = next.idempotency_key.clone();
@@ -423,7 +451,11 @@ pub(crate) fn recover_opencode_inboxes(app: AppHandle, state: &AppState) -> Resu
                 {
                     let mut store = runtime.lock().map_err(|error| error.to_string())?;
                     store
-                        .update_session_runtime(session.id, SessionRuntimeState::Running, None)
+                        .update_session_runtime(
+                            session.id,
+                            SessionRuntimeState::Running,
+                            Some(&message_id),
+                        )
                         .map_err(|error| error.to_string())?;
                     store
                         .finish_delivery(
@@ -454,6 +486,7 @@ pub(crate) fn recover_opencode_inboxes(app: AppHandle, state: &AppState) -> Resu
                     OpenCodeMonitorContext {
                         runtime: runtime.clone(),
                         attempts: attempts.clone(),
+                        live_sessions: live_sessions.clone(),
                         app: app_for_worker.clone(),
                         session: session.clone(),
                     },
@@ -900,15 +933,36 @@ pub async fn bind_agent_session(
         return Err("clipboard-only profiles cannot own a session".into());
     }
     let provider = AgentProvider::from_profile_and_executable(&profile_id, &profile.executable);
+    let executable = (provider == AgentProvider::OpenCode)
+        .then(|| platform::resolve_command(&profile.executable))
+        .flatten();
     let external_session_id = external_session_id.trim().to_owned();
     let runtime = state.runtime.clone();
     let project_path = project.path.clone();
     let project_id = project.id;
     let request_timeout = state.config.agent_request_timeout;
+    let config = state.config.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let verification = if provider == AgentProvider::Codex
-            && CodexAppSession::verify_thread(&external_session_id, request_timeout).is_ok()
-        {
+        let verified = match provider {
+            AgentProvider::Codex => {
+                CodexAppSession::verify_thread(&external_session_id, request_timeout).is_ok()
+            }
+            AgentProvider::OpenCode => executable.is_some_and(|executable| {
+                OpenCodeServer::start(
+                    &project_path,
+                    &executable,
+                    config.agent_request_timeout,
+                    config.agent_health_check_timeout,
+                    config.agent_status_poll_interval,
+                    config.agent_server_start_attempts,
+                    config.agent_error_body_limit_bytes,
+                )
+                .and_then(|server| server.verify_session(&external_session_id))
+                .is_ok()
+            }),
+            AgentProvider::ClaudeCode | AgentProvider::Other => false,
+        };
+        let verification = if verified {
             SessionVerification::Verified
         } else {
             SessionVerification::Unverified
@@ -927,6 +981,114 @@ pub async fn bind_agent_session(
                 working_directory: &project_path,
                 state: SessionRuntimeState::NotLoaded,
             })
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn update_agent_session(
+    project_id: String,
+    session_id: String,
+    external_session_id: String,
+    display_name: Option<String>,
+    confirm_replacement: bool,
+    state: State<'_, AppState>,
+) -> Result<SessionBinding, String> {
+    let project = registered_project(&project_id, &state)?;
+    let session_id = Uuid::parse_str(&session_id).map_err(|error| error.to_string())?;
+    let current = state
+        .runtime
+        .lock()
+        .map_err(|error| error.to_string())?
+        .session(session_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("session binding not found: {session_id}"))?;
+    if current.project_id != project.id {
+        return Err("selected session belongs to another project".into());
+    }
+    if matches!(
+        current.state,
+        SessionRuntimeState::Starting
+            | SessionRuntimeState::Running
+            | SessionRuntimeState::WaitingApproval
+            | SessionRuntimeState::Interrupting
+    ) {
+        return Err("运行中的 Session 不能修改绑定；请等待其空闲后重试".into());
+    }
+    let external_session_id = external_session_id.trim().to_owned();
+    if external_session_id.is_empty() {
+        return Err("session ID cannot be empty".into());
+    }
+    let replacing_external_id = external_session_id != current.external_session_id;
+    if replacing_external_id
+        && current.source != SessionBindingSource::Manual
+        && !confirm_replacement
+    {
+        return Err("replacing a managed Session binding requires explicit confirmation".into());
+    }
+    let display_name = display_name.and_then(|value| {
+        let value = value.trim().to_owned();
+        (!value.is_empty()).then_some(value)
+    });
+    let profile = state
+        .profiles
+        .lock()
+        .map_err(|error| error.to_string())?
+        .find(&current.profile_id)
+        .ok_or_else(|| format!("agent profile not found: {}", current.profile_id))?;
+    let executable = (current.provider == AgentProvider::OpenCode)
+        .then(|| platform::resolve_command(&profile.executable))
+        .flatten();
+    let runtime = state.runtime.clone();
+    let config = state.config.clone();
+    let project_path = project.path;
+    tauri::async_runtime::spawn_blocking(move || {
+        let verification = match current.provider {
+            AgentProvider::Codex => {
+                if CodexAppSession::verify_thread(
+                    &external_session_id,
+                    config.agent_request_timeout,
+                )
+                .is_ok()
+                {
+                    SessionVerification::Verified
+                } else {
+                    SessionVerification::Unverified
+                }
+            }
+            AgentProvider::OpenCode => {
+                if executable.is_some_and(|executable| {
+                    OpenCodeServer::start(
+                        &project_path,
+                        &executable,
+                        config.agent_request_timeout,
+                        config.agent_health_check_timeout,
+                        config.agent_status_poll_interval,
+                        config.agent_server_start_attempts,
+                        config.agent_error_body_limit_bytes,
+                    )
+                    .and_then(|server| server.verify_session(&external_session_id))
+                    .is_ok()
+                }) {
+                    SessionVerification::Verified
+                } else {
+                    SessionVerification::Unverified
+                }
+            }
+            AgentProvider::ClaudeCode | AgentProvider::Other => SessionVerification::Unverified,
+        };
+        runtime
+            .lock()
+            .map_err(|error| error.to_string())?
+            .update_session_binding(
+                session_id,
+                current.project_id,
+                &external_session_id,
+                display_name.as_deref(),
+                verification,
+            )
             .map_err(|error| error.to_string())
     })
     .await
@@ -1484,6 +1646,7 @@ async fn push_task_to_opencode_session(
     let current_is_delivery = push.id == delivery_push.id;
     let runtime = state.runtime.clone();
     let attempts = state.push_attempts.clone();
+    let live_sessions = state.opencode_sessions.clone();
     let app_for_worker = app.clone();
     let config = state.config.clone();
     let delivery_attempt_id = Uuid::parse_str(&delivery_push.idempotency_key)
@@ -1505,7 +1668,33 @@ async fn push_task_to_opencode_session(
             )?;
             server.verify_session(&session_for_worker.external_session_id)?;
             if !server.session_is_idle(&session_for_worker.external_session_id)? {
-                return Err("OpenCode Session is busy; retry after it becomes idle".into());
+                {
+                    let mut store = runtime.lock().map_err(|error| error.to_string())?;
+                    store
+                        .requeue_delivery(
+                            delivery_push_id,
+                            "OpenCode Session is busy; waiting for the safe boundary",
+                        )
+                        .map_err(|error| error.to_string())?;
+                    store
+                        .update_session_runtime(
+                            session_for_worker.id,
+                            SessionRuntimeState::Running,
+                            None,
+                        )
+                        .map_err(|error| error.to_string())?;
+                }
+                let monitor_context = OpenCodeMonitorContext {
+                    runtime: runtime.clone(),
+                    attempts: attempts.clone(),
+                    live_sessions: live_sessions.clone(),
+                    app: app_for_worker.clone(),
+                    session: session_for_worker.clone(),
+                };
+                std::thread::spawn(move || {
+                    wait_for_opencode_idle_and_drain(server, monitor_context);
+                });
+                return Ok(OpenCodeDeliveryStart::Queued);
             }
             let process_id = server.process_id();
             let message_id = delivery_push.idempotency_key.clone();
@@ -1521,7 +1710,7 @@ async fn push_task_to_opencode_session(
                     .update_session_runtime(
                         session_for_worker.id,
                         SessionRuntimeState::Running,
-                        None,
+                        Some(&message_id),
                     )
                     .map_err(|error| error.to_string())?;
                 store
@@ -1558,12 +1747,13 @@ async fn push_task_to_opencode_session(
                     OpenCodeMonitorContext {
                         runtime: monitor_runtime,
                         attempts: monitor_attempts,
+                        live_sessions,
                         app: monitor_app,
                         session: monitor_session,
                     },
                 );
             });
-            Ok::<_, String>(started)
+            Ok::<_, String>(OpenCodeDeliveryStart::Delivered(started))
         })();
         if let Err(error) = &operation {
             if let Ok(mut store) = runtime.lock() {
@@ -1603,18 +1793,33 @@ async fn push_task_to_opencode_session(
     .map_err(|error| error.to_string())?;
 
     match delivery {
-        Ok(started) if current_is_delivery => Ok(PushOutcome {
-            attempt: started,
-            pointer_prompt,
-            message: "已追加到 OpenCode Session".into(),
-            session: Some(session),
-        }),
-        Ok(_) => Ok(PushOutcome {
-            attempt,
-            pointer_prompt,
-            message: "已恢复并开始投递较早的排队内容；本次 Push 将继续按 FIFO 等待".into(),
-            session: Some(session),
-        }),
+        Ok(OpenCodeDeliveryStart::Delivered(started)) if current_is_delivery => {
+            let current = latest_session(state, session)?;
+            Ok(PushOutcome {
+                attempt: started,
+                pointer_prompt,
+                message: "已追加到 OpenCode Session".into(),
+                session: Some(current),
+            })
+        }
+        Ok(OpenCodeDeliveryStart::Delivered(_)) => {
+            let current = latest_session(state, session)?;
+            Ok(PushOutcome {
+                attempt,
+                pointer_prompt,
+                message: "已恢复并开始投递较早的排队内容；本次 Push 将继续按 FIFO 等待".into(),
+                session: Some(current),
+            })
+        }
+        Ok(OpenCodeDeliveryStart::Queued) => {
+            let current = latest_session(state, session)?;
+            Ok(PushOutcome {
+                attempt,
+                pointer_prompt,
+                message: "OpenCode Session 正在工作；本次 Push 已持久化并按 FIFO 等待空闲".into(),
+                session: Some(current),
+            })
+        }
         Err(error) => Ok(PushOutcome {
             attempt: state
                 .push_attempts
@@ -1652,7 +1857,14 @@ pub async fn steer_task_session(
         .session(session_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("session binding not found: {session_id}"))?;
-    if session.project_id != project.id || session.provider != AgentProvider::Codex {
+    if session.project_id != project.id {
+        return Err("selected Session belongs to another project".into());
+    }
+    if session.provider == AgentProvider::OpenCode {
+        return interrupt_opencode_session(project, task_id, session, pointer_prompt, app, &state)
+            .await;
+    }
+    if session.provider != AgentProvider::Codex {
         return Err("selected Session is not a Codex Session in this project".into());
     }
     let active_turn_id = session
@@ -1944,6 +2156,113 @@ pub async fn interrupt_task_session(
     })
 }
 
+async fn interrupt_opencode_session(
+    project: RegisteredProject,
+    task_id: String,
+    session: SessionBinding,
+    pointer_prompt: PointerPrompt,
+    app: AppHandle,
+    state: &State<'_, AppState>,
+) -> Result<PushOutcome, String> {
+    route_push(
+        PushMode::ExistingSession,
+        PushDeliveryPolicy::InterruptThenAppend,
+        session.state,
+        OPENCODE_CAPABILITIES,
+    )
+    .map_err(|error| format!("OpenCode Session {}: {error}", session.external_session_id))?;
+    if session.state != SessionRuntimeState::Running {
+        return Err("OpenCode Session 当前不在运行中，无需中断".into());
+    }
+    let live = state
+        .opencode_sessions
+        .lock()
+        .map_err(|error| error.to_string())?
+        .get(&session.id)
+        .cloned()
+        .ok_or_else(|| "OpenCode Live Session 连接不可用；没有中断进程或发送任何输入".to_owned())?;
+    let attempt = state
+        .push_attempts
+        .lock()
+        .map_err(|error| error.to_string())?
+        .requested(project.id, &task_id, &session.profile_id)
+        .map_err(|error| error.to_string())?;
+    emit_or_log(&app, PUSH_ATTEMPT_EVENT, &attempt);
+    let push = {
+        let mut store = state.runtime.lock().map_err(|error| error.to_string())?;
+        let push = store
+            .enqueue_push(NewPush {
+                project_id: project.id,
+                task_id: &task_id,
+                selected_profile_id: None,
+                target_run_id: None,
+                target_session_id: Some(session.id),
+                mode: PushMode::ExistingSession,
+                delivery: PushDeliveryPolicy::InterruptThenAppend,
+                content: &pointer_prompt.text,
+                idempotency_key: &attempt.id.to_string(),
+            })
+            .map_err(|error| error.to_string())?;
+        let run = store
+            .create_run(
+                project.id,
+                &task_id,
+                &session.profile_id,
+                AgentProvider::OpenCode,
+                Some(session.id),
+                "interrupting",
+            )
+            .map_err(|error| error.to_string())?;
+        store
+            .resolve_push(push.id, run.id, session.id)
+            .map_err(|error| error.to_string())?;
+        store
+            .update_session_runtime(session.id, SessionRuntimeState::Interrupting, None)
+            .map_err(|error| error.to_string())?;
+        push
+    };
+    let external_session_id = session.external_session_id.clone();
+    let result =
+        tauri::async_runtime::spawn_blocking(move || live.abort_session(&external_session_id))
+            .await
+            .map_err(|error| error.to_string())?;
+    if let Err(error) = result {
+        if let Ok(mut store) = state.runtime.lock() {
+            let _ = store.finish_delivery(push.id, PushStatus::Failed, None, Some(&error), true);
+            let _ = store.update_session_runtime(
+                session.id,
+                SessionRuntimeState::Running,
+                session.active_turn_id.as_deref(),
+            );
+        }
+        let failed = state
+            .push_attempts
+            .lock()
+            .map_err(|lock_error| lock_error.to_string())?
+            .update(
+                attempt.id,
+                PushAttemptStatus::FailedToStart,
+                None,
+                Some(error.clone()),
+                PushDelivery::Process,
+            )
+            .map_err(|persist_error| persist_error.to_string())?;
+        emit_or_log(&app, PUSH_ATTEMPT_EVENT, &failed);
+        return Ok(PushOutcome {
+            attempt: failed,
+            pointer_prompt,
+            message: format!("OpenCode 中断失败，未创建新 Session：{error}"),
+            session: Some(session),
+        });
+    }
+    Ok(PushOutcome {
+        attempt,
+        pointer_prompt,
+        message: "已请求中断 OpenCode Session；将在确认空闲后按 FIFO 追加".into(),
+        session: Some(session),
+    })
+}
+
 #[tauri::command]
 pub async fn fork_task_session(
     project_id: String,
@@ -1966,6 +2285,9 @@ pub async fn fork_task_session(
         .ok_or_else(|| format!("session binding not found: {session_id}"))?;
     if source.project_id != project.id {
         return Err("selected session belongs to another project".into());
+    }
+    if source.provider == AgentProvider::OpenCode {
+        return fork_opencode_session(project, task_id, source, pointer_prompt, app, &state).await;
     }
     if source.provider != AgentProvider::Codex {
         return Err("this Provider does not support Session fork".into());
@@ -2154,6 +2476,205 @@ pub async fn fork_task_session(
             attempt,
             pointer_prompt,
             message: format!("创建 Session 分支失败：{error}"),
+            session: None,
+        }),
+    }
+}
+
+async fn fork_opencode_session(
+    project: RegisteredProject,
+    task_id: String,
+    source: SessionBinding,
+    pointer_prompt: PointerPrompt,
+    app: AppHandle,
+    state: &State<'_, AppState>,
+) -> Result<PushOutcome, String> {
+    if !matches!(
+        source.state,
+        SessionRuntimeState::Idle | SessionRuntimeState::NotLoaded
+    ) {
+        return Err("OpenCode Session 正在工作；请等待其空闲后再创建 Session 分支".into());
+    }
+    let profile = state
+        .profiles
+        .lock()
+        .map_err(|error| error.to_string())?
+        .find(&source.profile_id)
+        .ok_or_else(|| format!("agent profile not found: {}", source.profile_id))?;
+    let executable = platform::resolve_command(&profile.executable).ok_or_else(|| {
+        format!(
+            "OpenCode executable not found for profile {}: {}",
+            profile.id, profile.executable
+        )
+    })?;
+    let attempt = state
+        .push_attempts
+        .lock()
+        .map_err(|error| error.to_string())?
+        .requested(project.id, &task_id, &source.profile_id)
+        .map_err(|error| error.to_string())?;
+    emit_or_log(&app, PUSH_ATTEMPT_EVENT, &attempt);
+    let source_original_state = source.state;
+    let push = {
+        let mut store = state.runtime.lock().map_err(|error| error.to_string())?;
+        let push = store
+            .enqueue_push(NewPush {
+                project_id: project.id,
+                task_id: &task_id,
+                selected_profile_id: None,
+                target_run_id: None,
+                target_session_id: Some(source.id),
+                mode: PushMode::Fork,
+                delivery: PushDeliveryPolicy::SafeBoundary,
+                content: &pointer_prompt.text,
+                idempotency_key: &attempt.id.to_string(),
+            })
+            .map_err(|error| error.to_string())?;
+        store
+            .begin_delivery(push.id)
+            .map_err(|error| error.to_string())?;
+        store
+            .update_session_runtime(source.id, SessionRuntimeState::Starting, None)
+            .map_err(|error| error.to_string())?;
+        push
+    };
+    let runtime = state.runtime.clone();
+    let attempts = state.push_attempts.clone();
+    let live_sessions = state.opencode_sessions.clone();
+    let config = state.config.clone();
+    let project_path = project.path.clone();
+    let profile_id = source.profile_id.clone();
+    let task_id_for_worker = task_id.clone();
+    let prompt = pointer_prompt.text.clone();
+    let attempt_id = attempt.id;
+    let app_for_worker = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let operation = (|| {
+            let server = OpenCodeServer::start(
+                &project_path,
+                &executable,
+                config.agent_request_timeout,
+                config.agent_health_check_timeout,
+                config.agent_status_poll_interval,
+                config.agent_server_start_attempts,
+                config.agent_error_body_limit_bytes,
+            )?;
+            server.verify_session(&source.external_session_id)?;
+            let forked_session_id = server.fork_session(&source.external_session_id)?;
+            runtime
+                .lock()
+                .map_err(|error| error.to_string())?
+                .update_session_runtime(source.id, source_original_state, None)
+                .map_err(|error| error.to_string())?;
+            let display_name = format!("{task_id_for_worker} · {profile_id} 分支");
+            let (run, binding) = runtime
+                .lock()
+                .map_err(|error| error.to_string())?
+                .create_run_with_session(
+                    project.id,
+                    &task_id_for_worker,
+                    &profile_id,
+                    AgentProvider::OpenCode,
+                    NewSessionBinding {
+                        project_id: project.id,
+                        profile_id: &profile_id,
+                        provider: AgentProvider::OpenCode,
+                        external_session_id: &forked_session_id,
+                        source: SessionBindingSource::Managed,
+                        verification: SessionVerification::Verified,
+                        display_name: Some(&display_name),
+                        working_directory: &project_path,
+                        state: SessionRuntimeState::Starting,
+                    },
+                    "starting",
+                )
+                .map_err(|error| error.to_string())?;
+            runtime
+                .lock()
+                .map_err(|error| error.to_string())?
+                .resolve_push(push.id, run.id, binding.id)
+                .map_err(|error| error.to_string())?;
+            let message_id = attempt_id.to_string();
+            server.prompt_async(&forked_session_id, &message_id, &prompt)?;
+            {
+                let mut store = runtime.lock().map_err(|error| error.to_string())?;
+                store
+                    .update_session_runtime(
+                        binding.id,
+                        SessionRuntimeState::Running,
+                        Some(&message_id),
+                    )
+                    .map_err(|error| error.to_string())?;
+                store
+                    .finish_delivery(
+                        push.id,
+                        PushStatus::Delivered,
+                        Some(&message_id),
+                        None,
+                        false,
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            let started = attempts
+                .lock()
+                .map_err(|error| error.to_string())?
+                .update(
+                    attempt_id,
+                    PushAttemptStatus::Started,
+                    Some(server.process_id()),
+                    None,
+                    PushDelivery::Process,
+                )
+                .map_err(|error| error.to_string())?;
+            emit_or_log(&app_for_worker, PUSH_ATTEMPT_EVENT, &started);
+            let monitor_context = OpenCodeMonitorContext {
+                runtime: runtime.clone(),
+                attempts: attempts.clone(),
+                live_sessions: live_sessions.clone(),
+                app: app_for_worker.clone(),
+                session: binding.clone(),
+            };
+            std::thread::spawn(move || {
+                monitor_opencode_inbox(server, message_id, Some(attempt_id), monitor_context);
+            });
+            Ok::<_, String>((started, binding))
+        })();
+        if let Err(error) = &operation {
+            if let Ok(mut store) = runtime.lock() {
+                let _ =
+                    store.finish_delivery(push.id, PushStatus::Failed, None, Some(error), false);
+                let _ = store.update_session_runtime(source.id, source_original_state, None);
+            }
+            if let Ok(mut store) = attempts.lock()
+                && let Ok(failed) = store.update(
+                    attempt_id,
+                    PushAttemptStatus::FailedToStart,
+                    None,
+                    Some(error.clone()),
+                    PushDelivery::Process,
+                )
+            {
+                emit_or_log(&app_for_worker, PUSH_ATTEMPT_EVENT, &failed);
+            }
+        }
+        operation
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    match result {
+        Ok((started, binding)) => {
+            let binding = latest_session(state, binding)?;
+            Ok(PushOutcome {
+                attempt: started,
+                pointer_prompt,
+                message: "已创建 OpenCode Session 分支并接收任务".into(),
+                session: Some(binding),
+            })
+        }
+        Err(error) => Ok(PushOutcome {
+            attempt,
+            pointer_prompt,
+            message: format!("创建 OpenCode Session 分支失败：{error}"),
             session: None,
         }),
     }
@@ -2424,6 +2945,7 @@ async fn push_new_opencode_session(
 ) -> Result<PushOutcome, String> {
     let runtime = state.runtime.clone();
     let attempts = state.push_attempts.clone();
+    let live_sessions = state.opencode_sessions.clone();
     let prompt = pointer_prompt.text.clone();
     let app_for_worker = app.clone();
     let attempt_id = attempt.id;
@@ -2498,7 +3020,11 @@ async fn push_new_opencode_session(
             {
                 let mut store = runtime.lock().map_err(|error| error.to_string())?;
                 store
-                    .update_session_runtime(binding.id, SessionRuntimeState::Running, None)
+                    .update_session_runtime(
+                        binding.id,
+                        SessionRuntimeState::Running,
+                        Some(&message_id),
+                    )
                     .map_err(|error| error.to_string())?;
                 store
                     .finish_delivery(
@@ -2534,6 +3060,7 @@ async fn push_new_opencode_session(
                     OpenCodeMonitorContext {
                         runtime: monitor_runtime,
                         attempts: monitor_attempts,
+                        live_sessions,
                         app: monitor_app,
                         session: monitor_session,
                     },
@@ -2583,12 +3110,15 @@ async fn push_new_opencode_session(
     .await
     .map_err(|error| error.to_string())?;
     match result {
-        Ok((started, binding)) => Ok(PushOutcome {
-            attempt: started,
-            pointer_prompt,
-            message: "OpenCode 新 Session 已绑定并接收任务".into(),
-            session: Some(binding),
-        }),
+        Ok((started, binding)) => {
+            let binding = latest_session(state, binding)?;
+            Ok(PushOutcome {
+                attempt: started,
+                pointer_prompt,
+                message: "OpenCode 新 Session 已绑定并接收任务".into(),
+                session: Some(binding),
+            })
+        }
         Err(error) => Ok(PushOutcome {
             attempt: state
                 .push_attempts
@@ -2960,8 +3490,144 @@ async fn push_new_codex_session(
 struct OpenCodeMonitorContext {
     runtime: std::sync::Arc<std::sync::Mutex<aurapilot_core::runtime_store::RuntimeStore>>,
     attempts: std::sync::Arc<std::sync::Mutex<aurapilot_core::push_attempt::PushAttemptStore>>,
+    live_sessions:
+        std::sync::Arc<std::sync::Mutex<std::collections::HashMap<Uuid, OpenCodeLiveHandle>>>,
     app: AppHandle,
     session: SessionBinding,
+}
+
+fn wait_for_opencode_idle_and_drain(mut server: OpenCodeServer, context: OpenCodeMonitorContext) {
+    if let Err(error) = server.wait_until_idle(&context.session.external_session_id) {
+        if let Ok(mut store) = context.runtime.lock() {
+            let _ = store.update_session_runtime(
+                context.session.id,
+                SessionRuntimeState::NotLoaded,
+                None,
+            );
+        }
+        eprintln!(
+            "failed while waiting for OpenCode Session {} to become idle; queued Push was preserved: {error}",
+            context.session.external_session_id
+        );
+        return;
+    }
+
+    let next = match context.runtime.lock() {
+        Ok(mut store) => match store.claim_next_queued_push(context.session.id) {
+            Ok(Some(push)) => {
+                if let Err(error) = store.update_session_runtime(
+                    context.session.id,
+                    SessionRuntimeState::Starting,
+                    None,
+                ) {
+                    let _ = store.requeue_delivery(push.id, &error.to_string());
+                    eprintln!("failed to reserve idle OpenCode Session: {error}");
+                    return;
+                }
+                push
+            }
+            Ok(None) => {
+                let _ = store.update_session_runtime(
+                    context.session.id,
+                    SessionRuntimeState::Idle,
+                    None,
+                );
+                return;
+            }
+            Err(error) => {
+                eprintln!("failed to claim queued OpenCode push after idle: {error}");
+                return;
+            }
+        },
+        Err(error) => {
+            eprintln!("runtime store lock poisoned while resuming OpenCode inbox: {error}");
+            return;
+        }
+    };
+
+    let attempt_id = Uuid::parse_str(&next.idempotency_key).ok();
+    let message_id = next.idempotency_key.clone();
+    if let Err(error) = server.prompt_async(
+        &context.session.external_session_id,
+        &message_id,
+        &next.content,
+    ) {
+        if let Ok(mut store) = context.runtime.lock() {
+            let _ = store.finish_delivery(next.id, PushStatus::Failed, None, Some(&error), true);
+            let _ =
+                store.update_session_runtime(context.session.id, SessionRuntimeState::Failed, None);
+        }
+        if let Some(id) = attempt_id
+            && let Ok(mut store) = context.attempts.lock()
+            && let Ok(failed) = store.update(
+                id,
+                PushAttemptStatus::FailedToStart,
+                None,
+                Some(error.clone()),
+                PushDelivery::Process,
+            )
+        {
+            emit_or_log(&context.app, PUSH_ATTEMPT_EVENT, &failed);
+        }
+        eprintln!(
+            "failed to deliver queued OpenCode push {}: {error}",
+            next.id
+        );
+        return;
+    }
+
+    let process_id = server.process_id();
+    let persisted = context
+        .runtime
+        .lock()
+        .map_err(|error| error.to_string())
+        .and_then(|mut store| {
+            store
+                .update_session_runtime(
+                    context.session.id,
+                    SessionRuntimeState::Running,
+                    Some(&message_id),
+                )
+                .map_err(|error| error.to_string())?;
+            store
+                .finish_delivery(
+                    next.id,
+                    PushStatus::Delivered,
+                    Some(&message_id),
+                    None,
+                    false,
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        });
+    if let Err(error) = persisted {
+        if let Ok(mut store) = context.runtime.lock() {
+            let _ = store.finish_delivery(
+                next.id,
+                PushStatus::DeliveryUnknown,
+                None,
+                Some(&error),
+                false,
+            );
+            let _ =
+                store.update_session_runtime(context.session.id, SessionRuntimeState::Failed, None);
+        }
+        eprintln!("OpenCode accepted a queued push but persistence failed: {error}");
+        return;
+    }
+    if let Some(id) = attempt_id
+        && let Ok(mut store) = context.attempts.lock()
+        && let Ok(started) = store.update(
+            id,
+            PushAttemptStatus::Started,
+            Some(process_id),
+            None,
+            PushDelivery::Process,
+        )
+    {
+        emit_or_log(&context.app, PUSH_ATTEMPT_EVENT, &started);
+    }
+    monitor_opencode_inbox(server, message_id, attempt_id, context);
 }
 
 fn monitor_opencode_inbox(
@@ -2973,9 +3639,13 @@ fn monitor_opencode_inbox(
     let OpenCodeMonitorContext {
         runtime,
         attempts,
+        live_sessions,
         app,
         session,
     } = context;
+    if let Ok(mut sessions) = live_sessions.lock() {
+        sessions.insert(session.id, server.live_handle());
+    }
     let mut attempt_id = initial_attempt_id;
     loop {
         let process_id = server.process_id();
@@ -2994,14 +3664,26 @@ fn monitor_opencode_inbox(
             emit_or_log(&app, PUSH_ATTEMPT_EVENT, &exited);
         }
         if let Err(error) = completed {
-            if let Ok(mut store) = runtime.lock()
-                && let Err(persist_error) =
-                    store.update_session_runtime(session.id, SessionRuntimeState::Failed, None)
-            {
-                eprintln!("failed to persist OpenCode session failure: {persist_error}");
+            let explicitly_interrupted = runtime
+                .lock()
+                .ok()
+                .and_then(|store| store.session(session.id).ok().flatten())
+                .is_some_and(|current| current.state == SessionRuntimeState::Interrupting);
+            if explicitly_interrupted {
+                eprintln!(
+                    "OpenCode Session {} reached an explicit interrupt boundary: {error}",
+                    session.external_session_id
+                );
+            } else {
+                if let Ok(mut store) = runtime.lock()
+                    && let Err(persist_error) =
+                        store.update_session_runtime(session.id, SessionRuntimeState::Failed, None)
+                {
+                    eprintln!("failed to persist OpenCode session failure: {persist_error}");
+                }
+                eprintln!("OpenCode Session monitor stopped: {error}");
+                break;
             }
-            eprintln!("OpenCode Session monitor stopped: {error}");
-            break;
         }
 
         let next = match runtime.lock() {
@@ -3065,7 +3747,7 @@ fn monitor_opencode_inbox(
                                 .update_session_runtime(
                                     session.id,
                                     SessionRuntimeState::Running,
-                                    None,
+                                    Some(&next_message_id),
                                 )
                                 .map_err(|error| error.to_string())?;
                             store
@@ -3142,6 +3824,9 @@ fn monitor_opencode_inbox(
                 break;
             }
         }
+    }
+    if let Ok(mut sessions) = live_sessions.lock() {
+        sessions.remove(&session.id);
     }
 }
 
@@ -3697,6 +4382,19 @@ fn registered_project(id: &str, state: &State<'_, AppState>) -> Result<Registere
         .find(|project| project.id == id)
         .cloned()
         .ok_or_else(|| format!("registered project not found: {id}"))
+}
+
+fn latest_session(
+    state: &State<'_, AppState>,
+    fallback: SessionBinding,
+) -> Result<SessionBinding, String> {
+    state
+        .runtime
+        .lock()
+        .map_err(|error| error.to_string())?
+        .session(fallback.id)
+        .map_err(|error| error.to_string())
+        .map(|session| session.unwrap_or(fallback))
 }
 
 #[cfg(test)]
