@@ -2,12 +2,13 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   WorldSkinController,
+  type PetEventSignal,
   type WorldSkinRuntimeState,
   type WorldSkinViewport,
 } from './runtime'
 import type { WorldSkin } from './worldSkin'
 
-const props = defineProps<{ skin: WorldSkin }>()
+const props = defineProps<{ skin: WorldSkin; event?: PetEventSignal | null }>()
 const emit = defineEmits<{
   state: [state: WorldSkinRuntimeState]
 }>()
@@ -50,6 +51,9 @@ const onVisibilityChange = () => {
 }
 
 watch(() => [props.skin, retryKey.value] as const, activate)
+watch(() => props.event?.sequence, () => {
+  if (props.event) controller.dispatch({ type: 'pet-state', event: props.event.event })
+})
 
 onMounted(() => {
   if (container.value && typeof ResizeObserver !== 'undefined') {
@@ -76,7 +80,16 @@ onBeforeUnmount(() => {
     :data-status="state.status"
     aria-label="世界皮肤运行时"
   >
-    <div ref="container" class="world-skin-stage" />
+    <div ref="container" class="world-skin-stage">
+      <button
+        v-if="skin === 'seascape' && state.status === 'ready'"
+        type="button"
+        class="world-skin-pet-hitbox"
+        aria-label="和星贝打招呼"
+        title="和星贝打招呼"
+        @click="controller.dispatch({ type: 'pet-interact' })"
+      />
+    </div>
     <div v-if="state.status === 'loading'" class="world-skin-feedback loading" role="status">
       <span />正在加载海岸世界…
     </div>

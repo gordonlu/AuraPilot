@@ -74,6 +74,7 @@ export const HATCH_PET_ANIMATIONS = Object.freeze({
 
 export const HATCH_PET_EVENT_BINDINGS = Object.freeze({
   'task-created': 'waving',
+  'task-started': 'running',
   'task-blocked': 'waiting',
   'task-done': 'jumping',
   'task-review': 'review',

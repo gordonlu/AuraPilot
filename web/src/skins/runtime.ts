@@ -1,4 +1,5 @@
 import { WORLD_SKIN_CONFIG, type WorldSkin } from './worldSkin'
+import type { PetEventId } from './pets/manifest'
 
 export type WorldSkinRuntimeStatus = 'idle' | 'loading' | 'ready' | 'error'
 export type WorldSkinPauseReason = 'document-hidden' | 'host-unmounted' | 'skin-changed'
@@ -13,11 +14,21 @@ export interface WorldSkinRuntimeContext {
   signal: AbortSignal
 }
 
+export type WorldSkinRuntimeEvent =
+  | { type: 'pet-interact' }
+  | { type: 'pet-state'; event: PetEventId }
+
+export interface PetEventSignal {
+  sequence: number
+  event: PetEventId
+}
+
 export interface WorldSkinRuntime {
   mount(container: HTMLElement, context: WorldSkinRuntimeContext): Promise<void>
   resize(viewport: WorldSkinViewport): void
   pause(reason: WorldSkinPauseReason): void
   resume(): void
+  dispatch(event: WorldSkinRuntimeEvent): void
   dispose(): void
 }
 
@@ -130,6 +141,10 @@ export class WorldSkinController {
 
   resume(): void {
     this.runtime?.resume()
+  }
+
+  dispatch(event: WorldSkinRuntimeEvent): void {
+    this.runtime?.dispatch(event)
   }
 
   dispose(reason: WorldSkinPauseReason = 'host-unmounted'): void {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AddProjectModal from './components/AddProjectModal.vue'
 import AgentProfilesModal from './components/AgentProfilesModal.vue'
 import AuraTransferModal from './components/AuraTransferModal.vue'
@@ -24,6 +24,14 @@ import {
   type WorldSkin,
 } from './skins/worldSkin'
 import type { WorldSkinRuntimeState } from './skins/runtime'
+import type { PetEventSignal } from './skins/runtime'
+import type { PetEventId } from './skins/pets/manifest'
+import {
+  hasNewlyBlockedTask,
+  snapshotBlockedTasks,
+  transitionPetEvent,
+  type BlockedTaskState,
+} from './skins/pets/signals'
 import { nextTheme, resolveTheme, type Theme } from './theme'
 import type { LocatedTask, TaskDraft, TaskTransition } from './types/protocol'
 
@@ -35,6 +43,10 @@ const search = ref('')
 const theme = ref<Theme>(resolveTheme(localStorage.getItem('aurapilot-theme')))
 const worldSkin = ref<WorldSkin>(resolveWorldSkin(localStorage.getItem(WORLD_SKIN_STORAGE_KEY)))
 const worldSkinError = ref<string | null>(null)
+const petEvent = ref<PetEventSignal | null>(null)
+let petEventSequence = 0
+let blockedTaskState: BlockedTaskState = new Map()
+let blockedTaskBaselineReady = false
 const selected = ref<{ projectId: string; taskId: string } | null>(null)
 const modal = ref<'create' | 'edit' | 'add-project' | 'delete' | 'push' | 'profiles' | 'transfer' | null>(null)
 const showDiagnostics = ref(false)
@@ -96,6 +108,20 @@ const retryWorldSkin = () => {
   worldSkinError.value = null
   setWorldSkin('seascape')
 }
+const signalPet = (event: PetEventId) => {
+  petEvent.value = { sequence: ++petEventSequence, event }
+}
+watch(allSnapshots, (snapshots) => {
+  const next = snapshotBlockedTasks(snapshots)
+  if (blockedTaskBaselineReady && hasNewlyBlockedTask(blockedTaskState, next)) {
+    signalPet('task-blocked')
+  }
+  blockedTaskState = next
+  blockedTaskBaselineReady = true
+}, { deep: true })
+watch(() => projectsStore.error, (error, previous) => {
+  if (error && !previous) signalPet('sync-failed')
+})
 const openAddProject = () => {
   projectPath.value = ''
   projectCanInitialize.value = false
@@ -125,8 +151,10 @@ const chooseProjectDirectory = async () => {
 const saveTask = async (projectId: string, draft: TaskDraft) => {
   busy.value = true; actionError.value = null
   try {
+    const creating = modal.value !== 'edit'
     if (modal.value === 'edit' && selected.value) await projectsStore.update(projectId, selected.value.taskId, draft)
     else await projectsStore.create(projectId, draft)
+    if (creating) signalPet('task-created')
     modal.value = null; lastRefresh.value = new Date()
   } catch (error) { actionError.value = String(error) } finally { busy.value = false }
 }
@@ -152,7 +180,12 @@ const initializeProject = async (path: string) => {
 const transitionTask = async (input: TaskTransition) => {
   if (!selected.value) return
   busy.value = true; actionError.value = null
-  try { await projectsStore.transition(selected.value.projectId, selected.value.taskId, input); lastRefresh.value = new Date() }
+  try {
+    await projectsStore.transition(selected.value.projectId, selected.value.taskId, input)
+    const event = transitionPetEvent(input.target)
+    if (event) signalPet(event)
+    lastRefresh.value = new Date()
+  }
   catch (error) { actionError.value = String(error) } finally { busy.value = false }
 }
 const deleteTask = async () => {
@@ -245,7 +278,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="main-surface">
-        <WorldSkinHost :skin="worldSkin" @state="onWorldSkinState" />
+        <WorldSkinHost :skin="worldSkin" :event="petEvent" @state="onWorldSkinState" />
         <div v-if="projectsStore.loading" class="loading-state"><span/><p>正在扫描项目协议…</p></div>
         <EmptyState v-else-if="!allSnapshots.length" @add="openAddProject" />
         <ProjectsView v-else-if="activeView === 'projects'" :snapshots="allSnapshots" :search="search" @open="openProjectBoard" />
@@ -274,7 +307,11 @@ onBeforeUnmount(() => {
       @update:path="updateProjectPath" @browse="chooseProjectDirectory" @add="addProject"
       @initialize="initializeProject" @close="modal = null; actionError = null"
     />
-    <PushTaskModal v-if="modal === 'push' && selectedTask && selectedProject" :task="selectedTask" :project="selectedProject" @close="modal = null" />
+    <PushTaskModal
+      v-if="modal === 'push' && selectedTask && selectedProject"
+      :task="selectedTask" :project="selectedProject"
+      @close="modal = null" @pet-event="signalPet"
+    />
     <AgentProfilesModal v-if="modal === 'profiles'" :projects="allSnapshots" @close="modal = null" />
     <AuraTransferModal
       v-if="modal === 'transfer'" :projects="allSnapshots"

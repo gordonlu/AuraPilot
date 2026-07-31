@@ -2,10 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { useAgentsStore } from '../stores/agents'
 import type { GitWorkspaceStatus, LocatedTask, PointerPrompt, ProjectSnapshot, PushOutcome } from '../types/protocol'
+import type { PetEventId } from '../skins/pets/manifest'
 import UiIcon from './UiIcon.vue'
 
 const props = defineProps<{ task: LocatedTask; project: ProjectSnapshot }>()
-defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; petEvent: [event: PetEventId] }>()
 const agents = useAgentsStore()
 const mode = ref<'new' | 'existing'>('new')
 const selectedProfile = ref('')
@@ -131,6 +132,7 @@ const applySessionOutcome = (result: PushOutcome) => {
 const push = async () => {
   if (!props.task.document.id || !canSubmit.value) return
   busy.value = true; error.value = null; outcome.value = null; branchResult.value = null; branchResultSuccess.value = false
+  emit('petEvent', 'push-started')
   try {
     const requestedBranch = mode.value === 'new' && branchStrategy.value === 'new'
       ? branchName.value.trim()
@@ -158,7 +160,13 @@ const push = async () => {
     }
     if (mode.value === 'new') props.project.registration.last_profile_id = selectedProfile.value
     applySessionOutcome(outcome.value)
-  } catch (caught) { error.value = String(caught) }
+    emit('petEvent', outcome.value.attempt.status === 'failed_to_start'
+      ? 'push-failed'
+      : 'push-succeeded')
+  } catch (caught) {
+    error.value = String(caught)
+    emit('petEvent', 'push-failed')
+  }
   finally { busy.value = false }
 }
 

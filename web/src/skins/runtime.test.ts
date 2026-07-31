@@ -10,6 +10,7 @@ const runtime = (): WorldSkinRuntime => ({
   resize: vi.fn(),
   pause: vi.fn(),
   resume: vi.fn(),
+  dispatch: vi.fn(),
   dispose: vi.fn(),
 })
 
@@ -43,9 +44,13 @@ describe('world skin runtime controller', () => {
     expect(states.map((state) => state.status)).toEqual(['loading', 'ready'])
     controller.pause('document-hidden')
     controller.resume()
+    controller.dispatch({ type: 'pet-interact' })
+    controller.dispatch({ type: 'pet-state', event: 'task-done' })
     controller.dispose()
     expect(instance.pause).toHaveBeenCalledTimes(2)
     expect(instance.resume).toHaveBeenCalledOnce()
+    expect(instance.dispatch).toHaveBeenCalledWith({ type: 'pet-interact' })
+    expect(instance.dispatch).toHaveBeenCalledWith({ type: 'pet-state', event: 'task-done' })
     expect(instance.dispose).toHaveBeenCalledOnce()
   })
 

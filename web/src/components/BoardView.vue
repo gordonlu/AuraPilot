@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { LocatedTask, ProjectSnapshot, TaskState } from '../types/protocol'
+import SeascapeBoardDecor from '../skins/seascape/SeascapeBoardDecor.vue'
 import TaskCard from './TaskCard.vue'
 
 const props = defineProps<{
@@ -11,11 +12,11 @@ const props = defineProps<{
 
 defineEmits<{ open: [projectId: string, task: LocatedTask] }>()
 
-const states: Array<{ key: TaskState; label: string }> = [
-  { key: 'backlog', label: 'Backlog' },
-  { key: 'in-progress', label: 'In Progress' },
-  { key: 'in-review', label: 'In Review' },
-  { key: 'done', label: 'Done' },
+const states: Array<{ key: TaskState; label: string; terrain: string }> = [
+  { key: 'backlog', label: 'Backlog', terrain: '沙滩' },
+  { key: 'in-progress', label: 'In Progress', terrain: '潮间带' },
+  { key: 'in-review', label: 'In Review', terrain: '浅海' },
+  { key: 'done', label: 'Done', terrain: '深海' },
 ]
 
 const grouped = computed(() => {
@@ -39,9 +40,18 @@ const grouped = computed(() => {
 
 <template>
   <div class="board-grid" aria-label="跨项目任务看板">
-    <section v-for="column in grouped" :key="column.key" class="board-column">
+    <SeascapeBoardDecor />
+    <section
+      v-for="column in grouped"
+      :key="column.key"
+      class="board-column"
+      :data-task-state="column.key"
+    >
       <header class="column-header">
-        <h2>{{ column.label }}</h2>
+        <div class="column-title">
+          <small>{{ column.terrain }}</small>
+          <h2>{{ column.label }}</h2>
+        </div>
         <span>{{ column.groups.reduce((sum, group) => sum + group.tasks.length, 0) }}</span>
       </header>
       <div class="column-content">

@@ -12,6 +12,7 @@ export const PET_MANIFEST_LIMITS = Object.freeze({
 
 export const PET_EVENT_IDS = [
   'task-created',
+  'task-started',
   'task-blocked',
   'task-done',
   'task-review',
