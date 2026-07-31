@@ -110,6 +110,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .footer-control:hover { border-color: var(--border-strong); color: var(--text-1); }
 .footer-control span { flex: 1; }
 .footer-control i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }.footer-control i.warning { background: var(--yellow); }
+.footer-control .beta-label { color: var(--yellow); font: 700 8px "JetBrains Mono", monospace; letter-spacing: .05em; }
 
 .workspace { display: flex; flex: 1; min-width: 0; flex-direction: column; }
 .runtime-error { min-height: 38px; display: flex; align-items: center; gap: 9px; padding: 7px 14px; border-bottom: 1px solid color-mix(in srgb, var(--red) 35%, var(--border)); background: color-mix(in srgb, var(--red) 9%, var(--bg-elev)); color: var(--red); font-size: 11px; }
@@ -132,6 +133,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .button.danger-filled { border-color: var(--red); background: var(--red); color: #fff; }.full-width { width: 100%; }
 
 .main-surface { position: relative; flex: 1; min-height: 0; overflow: auto; }
+.world-skin-host { position: absolute; z-index: 0; inset: 0; overflow: hidden; pointer-events: none; }
+.world-skin-stage, .world-skin-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.app-shell[data-world-skin="seascape"] .world-skin-host { z-index: 2; }
+.world-skin-feedback { position: absolute; z-index: 5; top: 10px; right: 10px; display: flex; align-items: center; gap: 7px; max-width: min(420px, calc(100% - 20px)); padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: color-mix(in srgb, var(--bg-elev) 92%, transparent); box-shadow: var(--shadow); color: var(--text-2); font-size: 10px; backdrop-filter: blur(10px); pointer-events: auto; }
+.world-skin-feedback.loading span { width: 12px; height: 12px; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+.world-skin-feedback.error { align-items: flex-start; flex-wrap: wrap; border-color: color-mix(in srgb, var(--red) 40%, var(--border)); color: var(--red); }
+.world-skin-feedback.error strong { flex: 1; }.world-skin-feedback.error small { flex-basis: 100%; overflow-wrap: anywhere; color: var(--text-2); }
+.world-skin-feedback.error button { border: 0; background: transparent; color: inherit; font-weight: 700; text-decoration: underline; }
+.world-skin-beta { position: absolute; z-index: 4; right: 10px; bottom: 10px; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--yellow) 32%, var(--border)); border-radius: 4px; background: color-mix(in srgb, var(--bg-elev) 88%, transparent); color: var(--yellow); font: 700 8px "JetBrains Mono", monospace; letter-spacing: .04em; backdrop-filter: blur(8px); }
+.main-surface > :not(.world-skin-host) { position: relative; z-index: 1; }
 .projects-view { min-height: 100%; padding: 26px; background: var(--bg-base); }
 .projects-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; max-width: 1380px; margin: 0 auto 20px; }
 .projects-heading .eyebrow { color: var(--accent); font: 700 9px "JetBrains Mono", monospace; letter-spacing: .12em; text-transform: uppercase; }

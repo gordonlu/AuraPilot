@@ -13,9 +13,17 @@ import TaskDrawer from './components/TaskDrawer.vue'
 import TaskFormModal from './components/TaskFormModal.vue'
 import PushTaskModal from './components/PushTaskModal.vue'
 import ProjectsView from './components/ProjectsView.vue'
+import WorldSkinHost from './skins/WorldSkinHost.vue'
 import UiIcon from './components/UiIcon.vue'
 import { useProjectsStore } from './stores/projects'
 import { useAgentsStore } from './stores/agents'
+import {
+  nextWorldSkin,
+  resolveWorldSkin,
+  WORLD_SKIN_STORAGE_KEY,
+  type WorldSkin,
+} from './skins/worldSkin'
+import type { WorldSkinRuntimeState } from './skins/runtime'
 import { nextTheme, resolveTheme, type Theme } from './theme'
 import type { LocatedTask, TaskDraft, TaskTransition } from './types/protocol'
 
@@ -25,6 +33,8 @@ const activeProject = ref('all')
 const activeView = ref<'projects' | 'board' | 'blocked'>('projects')
 const search = ref('')
 const theme = ref<Theme>(resolveTheme(localStorage.getItem('aurapilot-theme')))
+const worldSkin = ref<WorldSkin>(resolveWorldSkin(localStorage.getItem(WORLD_SKIN_STORAGE_KEY)))
+const worldSkinError = ref<string | null>(null)
 const selected = ref<{ projectId: string; taskId: string } | null>(null)
 const modal = ref<'create' | 'edit' | 'add-project' | 'delete' | 'push' | 'profiles' | 'transfer' | null>(null)
 const showDiagnostics = ref(false)
@@ -64,6 +74,27 @@ const toggleTheme = () => {
   theme.value = nextTheme(theme.value)
   localStorage.setItem('aurapilot-theme', theme.value)
   document.documentElement.dataset.theme = theme.value
+}
+const toggleWorldSkin = () => {
+  worldSkinError.value = null
+  worldSkin.value = nextWorldSkin(worldSkin.value)
+  localStorage.setItem(WORLD_SKIN_STORAGE_KEY, worldSkin.value)
+  document.documentElement.dataset.worldSkin = worldSkin.value
+}
+const setWorldSkin = (skin: WorldSkin) => {
+  worldSkin.value = skin
+  localStorage.setItem(WORLD_SKIN_STORAGE_KEY, skin)
+  document.documentElement.dataset.worldSkin = skin
+}
+const onWorldSkinState = (state: WorldSkinRuntimeState) => {
+  if (state.status === 'ready') worldSkinError.value = null
+  if (state.status !== 'error') return
+  worldSkinError.value = `${state.error ?? '未知错误'}。已安全回到经典界面。`
+  setWorldSkin('classic')
+}
+const retryWorldSkin = () => {
+  worldSkinError.value = null
+  setWorldSkin('seascape')
 }
 const openAddProject = () => {
   projectPath.value = ''
@@ -177,13 +208,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div :class="['app-shell', { 'blocked-atmosphere': activeView === 'blocked' }]" :data-theme="theme">
+  <div
+    :class="['app-shell', { 'blocked-atmosphere': activeView === 'blocked' }]"
+    :data-theme="theme"
+    :data-world-skin="worldSkin"
+  >
     <AppSidebar
       :snapshots="allSnapshots" :active-project="activeProject" :active-view="activeView"
-      :theme="theme" :diagnostic-count="diagnosticCount"
+      :theme="theme" :world-skin="worldSkin" :diagnostic-count="diagnosticCount"
       @project="activeProject = $event" @view="activeView = $event" @add="openAddProject"
       @theme="toggleTheme" @diagnostics="showDiagnostics = !showDiagnostics" @profiles="modal = 'profiles'"
-      @transfer="modal = 'transfer'"
+      @world-skin="toggleWorldSkin" @transfer="modal = 'transfer'"
     />
     <main class="workspace">
       <header class="app-toolbar">
@@ -203,8 +238,14 @@ onBeforeUnmount(() => {
         <span>Agent 操作失败：{{ agentsStore.runtimeError }}</span>
         <button @click="agentsStore.clearRuntimeError">知道了</button>
       </div>
+      <div v-if="worldSkinError" class="runtime-error" role="alert">
+        <UiIcon name="alert" :size="15"/>
+        <span>世界皮肤启动失败：{{ worldSkinError }}</span>
+        <button @click="retryWorldSkin">重试海岸世界</button>
+      </div>
 
       <div class="main-surface">
+        <WorldSkinHost :skin="worldSkin" @state="onWorldSkinState" />
         <div v-if="projectsStore.loading" class="loading-state"><span/><p>正在扫描项目协议…</p></div>
         <EmptyState v-else-if="!allSnapshots.length" @add="openAddProject" />
         <ProjectsView v-else-if="activeView === 'projects'" :snapshots="allSnapshots" :search="search" @open="openProjectBoard" />

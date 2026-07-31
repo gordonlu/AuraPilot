@@ -44,12 +44,22 @@ describe('Phase 3 production UI', () => {
       for (const task of snapshot.tasks) task.document.blockers = []
     }
     const wrapper = mount(AppSidebar, {
-      props: { snapshots, activeProject: 'all', activeView: 'board', theme: 'light', diagnosticCount: 0 },
+      props: {
+        snapshots,
+        activeProject: 'all',
+        activeView: 'board',
+        theme: 'light',
+        worldSkin: 'classic',
+        diagnosticCount: 0,
+      },
     })
 
     const count = wrapper.find('.primary-nav button:last-child b')
     expect(count.text()).toBe('0')
     expect(count.classes()).not.toContain('danger-count')
+    expect(wrapper.find('.sidebar-footer button').text()).toContain('经典界面')
+    await wrapper.find('.sidebar-footer button').trigger('click')
+    expect(wrapper.emitted('worldSkin')).toHaveLength(1)
 
     snapshots[0].tasks[0].document.blockers = ['waiting']
     await wrapper.setProps({ snapshots: [...snapshots] })

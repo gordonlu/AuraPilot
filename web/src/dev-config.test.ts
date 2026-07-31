@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import tauriConfig from '../../src-tauri/tauri.conf.json'
+import {
+  DEFAULT_WORLD_SKIN,
+  nextWorldSkin,
+  resolveWorldSkin,
+  WORLD_SKIN_CONFIG,
+  WORLD_SKIN_STORAGE_KEY,
+} from './skins/worldSkin'
 import { DEFAULT_THEME, nextTheme, resolveTheme } from './theme'
 
 describe('desktop development endpoint', () => {
@@ -21,5 +28,18 @@ describe('theme defaults', () => {
     expect(nextTheme('light')).toBe('brand')
     expect(nextTheme('brand')).toBe('dark')
     expect(nextTheme('dark')).toBe('light')
+  })
+})
+
+describe('world skin defaults', () => {
+  it('keeps the current UI as default and the experimental runtime bounded', () => {
+    expect(DEFAULT_WORLD_SKIN).toBe('classic')
+    expect(WORLD_SKIN_STORAGE_KEY).toBe('aurapilot-world-skin')
+    expect(WORLD_SKIN_CONFIG.loadTimeoutMs).toBe(8_000)
+    expect(resolveWorldSkin(null)).toBe('classic')
+    expect(resolveWorldSkin('unknown')).toBe('classic')
+    expect(resolveWorldSkin('seascape')).toBe('seascape')
+    expect(nextWorldSkin('classic')).toBe('seascape')
+    expect(nextWorldSkin('seascape')).toBe('classic')
   })
 })

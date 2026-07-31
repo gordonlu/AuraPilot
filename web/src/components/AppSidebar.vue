@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { WorldSkin } from '../skins/worldSkin'
+import { WORLD_SKIN_PRESENTATION } from '../skins/worldSkin'
 import type { Theme } from '../theme'
 import type { ProjectSnapshot } from '../types/protocol'
 import brandLogo from '../assets/aurapilot-logo.webp'
@@ -11,6 +13,7 @@ const props = defineProps<{
   activeProject: string
   activeView: 'projects' | 'board' | 'blocked'
   theme: Theme
+  worldSkin: WorldSkin
   diagnosticCount: number
 }>()
 
@@ -22,12 +25,14 @@ const themePresentation = computed(() => ({
   brand: { icon: 'palette', label: '品牌配色' },
   dark: { icon: 'moon', label: '暗色模式' },
 })[props.theme])
+const worldSkinPresentation = computed(() => WORLD_SKIN_PRESENTATION[props.worldSkin])
 
 defineEmits<{
   project: [id: string]
   view: [view: 'projects' | 'board' | 'blocked']
   add: []
   theme: []
+  worldSkin: []
   diagnostics: []
   profiles: []
   transfer: []
@@ -77,6 +82,15 @@ defineEmits<{
     </nav>
 
     <div class="sidebar-footer">
+      <button
+        class="footer-control"
+        :title="worldSkinPresentation.actionLabel"
+        @click="$emit('worldSkin')"
+      >
+        <UiIcon name="compass"/>
+        <span>{{ worldSkinPresentation.label }}</span>
+        <b v-if="worldSkinPresentation.beta" class="beta-label">BETA</b>
+      </button>
       <button class="footer-control" @click="$emit('transfer')">
         <UiIcon name="archive"/><span>任务包</span>
       </button>
