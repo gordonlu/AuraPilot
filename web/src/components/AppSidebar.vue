@@ -85,6 +85,7 @@ defineEmits<{
       <button
         class="footer-control"
         :title="worldSkinPresentation.actionLabel"
+        aria-haspopup="dialog"
         @click="$emit('worldSkin')"
       >
         <UiIcon name="compass"/>

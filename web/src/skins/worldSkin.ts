@@ -11,16 +11,22 @@ export const WORLD_SKIN_CONFIG = Object.freeze({
 export const WORLD_SKIN_PRESENTATION: Record<WorldSkin, {
   label: string
   actionLabel: string
+  description: string
+  motionLabel: string
   beta: boolean
 }> = {
   classic: {
     label: '经典界面',
-    actionLabel: '切换到海岸世界',
+    actionLabel: '选择世界皮肤',
+    description: '清晰、安静的标准任务工作台。',
+    motionLabel: '静态界面',
     beta: false,
   },
   seascape: {
     label: '海岸世界',
-    actionLabel: '切换到经典界面',
+    actionLabel: '选择世界皮肤',
+    description: '潮汐、浪花与星贝陪你推进任务。',
+    motionLabel: '动态世界',
     beta: true,
   },
 }

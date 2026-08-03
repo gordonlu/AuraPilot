@@ -7,10 +7,43 @@ import AppSidebar from './components/AppSidebar.vue'
 import TaskFormModal from './components/TaskFormModal.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
 import ProjectsView from './components/ProjectsView.vue'
+import WorldSkinPickerModal from './components/WorldSkinPickerModal.vue'
 import { demoSnapshots } from './demo'
 import { useProjectsStore } from './stores/projects'
 
 describe('Phase 3 production UI', () => {
+  it('selects a world skin explicitly and exposes its runtime state', async () => {
+    const wrapper = mount(WorldSkinPickerModal, {
+      props: {
+        current: 'classic',
+        runtimeState: { skin: 'classic', status: 'idle', error: null },
+      },
+    })
+
+    expect(wrapper.findAll('.world-skin-option')).toHaveLength(2)
+    expect(wrapper.find('.world-skin-option.classic').attributes('aria-checked')).toBe('true')
+    expect(wrapper.text()).toContain('静态界面')
+    expect(wrapper.text()).toContain('动态世界')
+
+    await wrapper.find('.world-skin-option.seascape').trigger('click')
+    expect(wrapper.emitted('select')?.[0]).toEqual(['seascape'])
+
+    await wrapper.setProps({
+      current: 'seascape',
+      runtimeState: { skin: 'seascape', status: 'loading', error: null },
+    })
+    expect(wrapper.find('.world-skin-option.seascape').attributes('aria-checked')).toBe('true')
+    expect(wrapper.find('.world-skin-option.seascape').text()).toContain('正在启动')
+
+    await wrapper.setProps({
+      current: 'classic',
+      runtimeState: { skin: 'classic', status: 'idle', error: null },
+      error: '无法启动海岸世界：WebGL unavailable',
+    })
+    expect(wrapper.find('.world-skin-option.seascape').text()).toContain('启动失败')
+    expect(wrapper.find('[role="alert"]').text()).toContain('WebGL unavailable')
+  })
+
   it('summarizes every project and opens the selected project board', async () => {
     const snapshots = demoSnapshots()
     const pinia = createPinia()

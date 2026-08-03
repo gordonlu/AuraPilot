@@ -13,12 +13,12 @@ import TaskDrawer from './components/TaskDrawer.vue'
 import TaskFormModal from './components/TaskFormModal.vue'
 import PushTaskModal from './components/PushTaskModal.vue'
 import ProjectsView from './components/ProjectsView.vue'
+import WorldSkinPickerModal from './components/WorldSkinPickerModal.vue'
 import WorldSkinHost from './skins/WorldSkinHost.vue'
 import UiIcon from './components/UiIcon.vue'
 import { useProjectsStore } from './stores/projects'
 import { useAgentsStore } from './stores/agents'
 import {
-  nextWorldSkin,
   resolveWorldSkin,
   WORLD_SKIN_STORAGE_KEY,
   type WorldSkin,
@@ -43,13 +43,14 @@ const activeView = ref<'projects' | 'board' | 'blocked'>('projects')
 const search = ref('')
 const theme = ref<Theme>(resolveTheme(localStorage.getItem('aurapilot-theme')))
 const worldSkin = ref<WorldSkin>(resolveWorldSkin(localStorage.getItem(WORLD_SKIN_STORAGE_KEY)))
+const worldSkinState = ref<WorldSkinRuntimeState>({ skin: worldSkin.value, status: 'idle', error: null })
 const worldSkinError = ref<string | null>(null)
 const petEvent = ref<PetEventSignal | null>(null)
 let petEventSequence = 0
 let blockedTaskState: BlockedTaskState = new Map()
 let blockedTaskBaselineReady = false
 const selected = ref<{ projectId: string; taskId: string } | null>(null)
-const modal = ref<'create' | 'edit' | 'add-project' | 'delete' | 'push' | 'profiles' | 'transfer' | null>(null)
+const modal = ref<'create' | 'edit' | 'add-project' | 'delete' | 'push' | 'profiles' | 'transfer' | 'world-skins' | null>(null)
 const showDiagnostics = ref(false)
 const busy = ref(false)
 const actionError = ref<string | null>(null)
@@ -99,21 +100,20 @@ const toggleTheme = () => {
   localStorage.setItem('aurapilot-theme', theme.value)
   document.documentElement.dataset.theme = theme.value
 }
-const toggleWorldSkin = () => {
-  worldSkinError.value = null
-  worldSkin.value = nextWorldSkin(worldSkin.value)
-  localStorage.setItem(WORLD_SKIN_STORAGE_KEY, worldSkin.value)
-  document.documentElement.dataset.worldSkin = worldSkin.value
-}
 const setWorldSkin = (skin: WorldSkin) => {
   worldSkin.value = skin
   localStorage.setItem(WORLD_SKIN_STORAGE_KEY, skin)
   document.documentElement.dataset.worldSkin = skin
 }
+const selectWorldSkin = (skin: WorldSkin) => {
+  worldSkinError.value = null
+  setWorldSkin(skin)
+}
 const onWorldSkinState = (state: WorldSkinRuntimeState) => {
+  worldSkinState.value = state
   if (state.status === 'ready') worldSkinError.value = null
   if (state.status !== 'error') return
-  worldSkinError.value = `${state.error ?? '未知错误'}。已安全回到经典界面。`
+  worldSkinError.value = state.error ?? '未知错误'
   setWorldSkin('classic')
 }
 const retryWorldSkin = () => {
@@ -263,7 +263,7 @@ onBeforeUnmount(() => {
       :theme="theme" :world-skin="worldSkin" :diagnostic-count="diagnosticCount"
       @project="activeProject = $event" @view="activeView = $event" @add="openAddProject"
       @theme="toggleTheme" @diagnostics="showDiagnostics = !showDiagnostics" @profiles="modal = 'profiles'"
-      @world-skin="toggleWorldSkin" @transfer="modal = 'transfer'"
+      @world-skin="modal = 'world-skins'" @transfer="modal = 'transfer'"
     />
     <main class="workspace">
       <header class="app-toolbar">
@@ -285,7 +285,7 @@ onBeforeUnmount(() => {
       </div>
       <div v-if="worldSkinError" class="runtime-error" role="alert">
         <UiIcon name="alert" :size="15"/>
-        <span>世界皮肤启动失败：{{ worldSkinError }}</span>
+        <span>世界皮肤启动失败：{{ worldSkinError }}。已安全回到经典界面。</span>
         <button @click="retryWorldSkin">重试海岸世界</button>
       </div>
 
@@ -333,6 +333,14 @@ onBeforeUnmount(() => {
     <AuraTransferModal
       v-if="modal === 'transfer'" :projects="allSnapshots"
       :initial-project-id="activeProject" @close="modal = null"
+    />
+    <WorldSkinPickerModal
+      v-if="modal === 'world-skins'"
+      :current="worldSkin"
+      :runtime-state="worldSkinState"
+      :error="worldSkinError"
+      @select="selectWorldSkin"
+      @close="modal = null"
     />
     <ConfirmDialog
       v-if="modal === 'delete' && selectedTask" title="删除任务？"
