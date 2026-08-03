@@ -1,4 +1,4 @@
-import { WORLD_SKIN_CONFIG, type WorldSkin } from './worldSkin'
+import { WORLD_SKIN_CONFIG, WORLD_SKIN_PRESENTATION, type WorldSkin } from './worldSkin'
 import type { PetEventId } from './pets/manifest'
 
 export type WorldSkinRuntimeStatus = 'idle' | 'loading' | 'ready' | 'error'
@@ -124,7 +124,7 @@ export class WorldSkinController {
       this.publish({
         skin,
         status: 'error',
-        error: `无法启动${skin === 'seascape' ? '海岸世界' : '世界皮肤'}：${errorMessage(error)}`,
+        error: `无法启动${WORLD_SKIN_PRESENTATION[skin].label}：${errorMessage(error)}`,
       })
     } finally {
       if (timeout) clearTimeout(timeout)

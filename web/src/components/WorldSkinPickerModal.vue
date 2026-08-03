@@ -12,6 +12,7 @@ const props = defineProps<{
   current: WorldSkin
   runtimeState: WorldSkinRuntimeState
   error?: string | null
+  failedSkin?: Exclude<WorldSkin, 'classic'> | null
 }>()
 
 defineEmits<{
@@ -21,7 +22,7 @@ defineEmits<{
 
 const statusFor = computed(() => (skin: WorldSkin): string => {
   if (skin !== props.current) {
-    if (skin === 'seascape' && props.error) return '启动失败'
+    if (skin === props.failedSkin && props.error) return '启动失败'
     return '可选择'
   }
   if (skin === 'classic') return '当前使用'
@@ -75,7 +76,7 @@ const statusFor = computed(() => (skin: WorldSkin): string => {
               <span>{{ WORLD_SKIN_PRESENTATION[skin].description }}</span>
             </span>
             <span class="world-skin-option-footer">
-              <span><UiIcon :name="skin === 'seascape' ? 'sun' : 'board'" :size="14"/>{{ WORLD_SKIN_PRESENTATION[skin].motionLabel }}</span>
+              <span><UiIcon :name="skin === 'seascape' ? 'sun' : skin === 'stellar' ? 'compass' : 'board'" :size="14"/>{{ WORLD_SKIN_PRESENTATION[skin].motionLabel }}</span>
               <b :class="{ active: current === skin, error: statusFor(skin) === '启动失败' }">
                 {{ statusFor(skin) }}
               </b>
@@ -89,7 +90,7 @@ const statusFor = computed(() => (skin: WorldSkin): string => {
           role="alert"
         >
           <UiIcon name="alert" :size="15"/>
-          <span>{{ error }}。可以重新选择海岸世界重试，或继续使用经典界面。</span>
+          <span>{{ error }}。可以重新选择该世界重试，或继续使用经典界面。</span>
         </p>
       </div>
 

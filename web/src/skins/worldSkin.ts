@@ -1,8 +1,8 @@
-export type WorldSkin = 'classic' | 'seascape'
+export type WorldSkin = 'classic' | 'seascape' | 'stellar'
 
 export const DEFAULT_WORLD_SKIN: WorldSkin = 'classic'
 export const WORLD_SKIN_STORAGE_KEY = 'aurapilot-world-skin'
-export const WORLD_SKIN_ORDER: WorldSkin[] = ['classic', 'seascape']
+export const WORLD_SKIN_ORDER: WorldSkin[] = ['classic', 'seascape', 'stellar']
 
 export const WORLD_SKIN_CONFIG = Object.freeze({
   loadTimeoutMs: 8_000,
@@ -29,10 +29,17 @@ export const WORLD_SKIN_PRESENTATION: Record<WorldSkin, {
     motionLabel: '动态世界',
     beta: true,
   },
+  stellar: {
+    label: '星际航行',
+    actionLabel: '选择世界皮肤',
+    description: '在开放星空、航迹与星港之间推进任务。',
+    motionLabel: '动态世界',
+    beta: true,
+  },
 }
 
 export const resolveWorldSkin = (saved: string | null): WorldSkin =>
-  saved === 'seascape' ? saved : DEFAULT_WORLD_SKIN
+  saved === 'seascape' || saved === 'stellar' ? saved : DEFAULT_WORLD_SKIN
 
 export const nextWorldSkin = (current: WorldSkin): WorldSkin =>
   WORLD_SKIN_ORDER[(WORLD_SKIN_ORDER.indexOf(current) + 1) % WORLD_SKIN_ORDER.length]

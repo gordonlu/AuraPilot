@@ -21,6 +21,7 @@ import { useAgentsStore } from './stores/agents'
 import {
   resolveWorldSkin,
   WORLD_SKIN_STORAGE_KEY,
+  WORLD_SKIN_PRESENTATION,
   type WorldSkin,
 } from './skins/worldSkin'
 import type { WorldSkinRuntimeState } from './skins/runtime'
@@ -45,6 +46,7 @@ const theme = ref<Theme>(resolveTheme(localStorage.getItem('aurapilot-theme')))
 const worldSkin = ref<WorldSkin>(resolveWorldSkin(localStorage.getItem(WORLD_SKIN_STORAGE_KEY)))
 const worldSkinState = ref<WorldSkinRuntimeState>({ skin: worldSkin.value, status: 'idle', error: null })
 const worldSkinError = ref<string | null>(null)
+const failedWorldSkin = ref<Exclude<WorldSkin, 'classic'> | null>(null)
 const petEvent = ref<PetEventSignal | null>(null)
 let petEventSequence = 0
 let blockedTaskState: BlockedTaskState = new Map()
@@ -107,6 +109,7 @@ const setWorldSkin = (skin: WorldSkin) => {
 }
 const selectWorldSkin = (skin: WorldSkin) => {
   worldSkinError.value = null
+  failedWorldSkin.value = null
   setWorldSkin(skin)
 }
 const onWorldSkinState = (state: WorldSkinRuntimeState) => {
@@ -114,11 +117,12 @@ const onWorldSkinState = (state: WorldSkinRuntimeState) => {
   if (state.status === 'ready') worldSkinError.value = null
   if (state.status !== 'error') return
   worldSkinError.value = state.error ?? '未知错误'
+  if (state.skin !== 'classic') failedWorldSkin.value = state.skin
   setWorldSkin('classic')
 }
 const retryWorldSkin = () => {
   worldSkinError.value = null
-  setWorldSkin('seascape')
+  setWorldSkin(failedWorldSkin.value ?? 'seascape')
 }
 const signalPet = (event: PetEventId) => {
   petEvent.value = { sequence: ++petEventSequence, event }
@@ -286,7 +290,7 @@ onBeforeUnmount(() => {
       <div v-if="worldSkinError" class="runtime-error" role="alert">
         <UiIcon name="alert" :size="15"/>
         <span>世界皮肤启动失败：{{ worldSkinError }}。已安全回到经典界面。</span>
-        <button @click="retryWorldSkin">重试海岸世界</button>
+        <button @click="retryWorldSkin">重试{{ failedWorldSkin ? WORLD_SKIN_PRESENTATION[failedWorldSkin].label : '动态世界' }}</button>
       </div>
 
       <div class="main-surface">
@@ -339,6 +343,7 @@ onBeforeUnmount(() => {
       :current="worldSkin"
       :runtime-state="worldSkinState"
       :error="worldSkinError"
+      :failed-skin="failedWorldSkin"
       @select="selectWorldSkin"
       @close="modal = null"
     />

@@ -17,4 +17,16 @@ describe('seascape pet dialogue', () => {
     expect(interactionDialogue(0, context)).toBe('1 个任务在浅滩搁浅，先看看最具体的阻塞。')
     expect(interactionDialogue(1, context)).toBe('潮间带里有 2 个任务正在推进。')
   })
+
+  it('uses navigation language in the stellar world', () => {
+    expect(dialogueForPetEvent('task-started', 0, 'stellar')).toContain('推进器')
+    expect(interactionDialogue(0, {
+      projects: 2,
+      backlog: 1,
+      inProgress: 0,
+      inReview: 0,
+      done: 0,
+      blocked: 1,
+    }, 'stellar')).toContain('航路受阻')
+  })
 })

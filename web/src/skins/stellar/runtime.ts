@@ -6,11 +6,11 @@ import type {
   WorldSkinRuntimeEvent,
   WorldSkinViewport,
 } from '../runtime'
-import { PetActor, SEASCAPE_PET_CONFIG } from '../pets/actor'
+import { PetActor, STELLAR_PET_CONFIG } from '../pets/actor'
 
-class SeascapeRuntime implements WorldSkinRuntime {
+class StellarRuntime implements WorldSkinRuntime {
   private application: Application | null = null
-  private readonly pet = new PetActor(SEASCAPE_PET_CONFIG)
+  private readonly pet = new PetActor(STELLAR_PET_CONFIG)
   private viewport: WorldSkinViewport | null = null
   private container: HTMLElement | null = null
   private readonly updatePet = (ticker: { deltaMS: number }) => {
@@ -37,13 +37,14 @@ class SeascapeRuntime implements WorldSkinRuntime {
       application.canvas.className = 'world-skin-canvas'
       application.canvas.setAttribute('aria-hidden', 'true')
       container.append(application.canvas)
-      const packageUrl = new URL(SEASCAPE_PET_CONFIG.packagePath, document.baseURI)
+      const packageUrl = new URL(STELLAR_PET_CONFIG.packagePath, document.baseURI)
       await this.pet.mount(application, packageUrl, context.signal)
       if (context.signal.aborted) {
         this.pet.dispose()
         application.destroy({ removeView: true }, { children: true })
         return
       }
+
       this.container = container
       application.ticker.add(this.updatePet)
       this.application = application
@@ -106,4 +107,4 @@ class SeascapeRuntime implements WorldSkinRuntime {
   }
 }
 
-export const createWorldSkinRuntime = (): WorldSkinRuntime => new SeascapeRuntime()
+export const createWorldSkinRuntime = (): WorldSkinRuntime => new StellarRuntime()

@@ -8,7 +8,21 @@ import { createHatchPetManifest } from './hatchPet'
 import type { PetAnimation, PetEventId, PetManifest } from './manifest'
 import type { WorldSkinViewport } from '../runtime'
 
-export const SEASCAPE_PET_CONFIG = Object.freeze({
+export interface PetActorConfig {
+  packagePath: string
+  manifestFile: string
+  rightInsetPx: number
+  bottomInsetPx: number
+  patrolLeftRatio: number
+  patrolSpeedPxPerSecond: number
+  restDurationMs: number
+  referenceViewportWidth: number
+  baseScale: number
+  minScale: number
+  maxScale: number
+}
+
+export const SEASCAPE_PET_CONFIG: Readonly<PetActorConfig> = Object.freeze({
   packagePath: 'pets/aura-starshell/',
   manifestFile: 'pet.json',
   rightInsetPx: 34,
@@ -16,6 +30,20 @@ export const SEASCAPE_PET_CONFIG = Object.freeze({
   patrolLeftRatio: 0.62,
   patrolSpeedPxPerSecond: 34,
   restDurationMs: 4_800,
+  referenceViewportWidth: 1200,
+  baseScale: 0.72,
+  minScale: 0.38,
+  maxScale: 0.82,
+})
+
+export const STELLAR_PET_CONFIG: Readonly<PetActorConfig> = Object.freeze({
+  packagePath: 'pets/aura-navigator/',
+  manifestFile: 'pet.json',
+  rightInsetPx: 34,
+  bottomInsetPx: 20,
+  patrolLeftRatio: 0.62,
+  patrolSpeedPxPerSecond: 30,
+  restDurationMs: 5_200,
   referenceViewportWidth: 1200,
   baseScale: 0.72,
   minScale: 0.38,
@@ -31,12 +59,12 @@ export interface PetPlacement {
   height: number
 }
 
-const boundedScale = (viewportWidth: number): number => Math.min(
-  SEASCAPE_PET_CONFIG.maxScale,
+const boundedScale = (viewportWidth: number, config: Readonly<PetActorConfig>): number => Math.min(
+  config.maxScale,
   Math.max(
-    SEASCAPE_PET_CONFIG.minScale,
-    (viewportWidth / SEASCAPE_PET_CONFIG.referenceViewportWidth)
-      * SEASCAPE_PET_CONFIG.baseScale,
+    config.minScale,
+    (viewportWidth / config.referenceViewportWidth)
+      * config.baseScale,
   ),
 )
 
@@ -156,9 +184,10 @@ const sliceAtlasFrames = async (
 
 const loadManifest = async (
   packageUrl: URL,
+  manifestFile: string,
   signal: AbortSignal,
 ): Promise<PetManifest> => {
-  const manifestUrl = new URL(SEASCAPE_PET_CONFIG.manifestFile, packageUrl)
+  const manifestUrl = new URL(manifestFile, packageUrl)
   const response = await fetch(manifestUrl, { signal })
   if (!response.ok) {
     throw new Error(`宠物清单加载失败：${response.status} ${response.statusText}`)
@@ -176,12 +205,14 @@ export class PetActor {
   private restElapsedMs = 0
   private positionX: number | null = null
 
+  constructor(private readonly config: Readonly<PetActorConfig> = SEASCAPE_PET_CONFIG) {}
+
   async mount(
     application: Application,
     packageUrl: URL,
     signal: AbortSignal,
   ): Promise<void> {
-    const manifest = await loadManifest(packageUrl, signal)
+    const manifest = await loadManifest(packageUrl, this.config.manifestFile, signal)
     const atlasUrl = new URL(manifest.atlas.src, packageUrl).toString()
     const textures = await sliceAtlasFrames(atlasUrl, manifest, signal)
     if (signal.aborted) throw new DOMException('宠物加载已取消', 'AbortError')
@@ -214,15 +245,15 @@ export class PetActor {
     const previousViewport = this.viewport
     const previousScale = this.sprite.scale.x
     const previousPosition = this.positionX
-    const scale = boundedScale(viewport.width)
-    const maximumX = viewport.width - SEASCAPE_PET_CONFIG.rightInsetPx
+    const scale = boundedScale(viewport.width, this.config)
+    const maximumX = viewport.width - this.config.rightInsetPx
     const minimumX = this.minimumPatrolX(viewport, scale)
     this.positionX = previousPosition === null || previousViewport === null
       ? maximumX
       : remapPatrolPosition(
           previousPosition,
           this.minimumPatrolX(previousViewport, previousScale),
-          previousViewport.width - SEASCAPE_PET_CONFIG.rightInsetPx,
+          previousViewport.width - this.config.rightInsetPx,
           minimumX,
           maximumX,
         )
@@ -230,7 +261,7 @@ export class PetActor {
     this.sprite.scale.set(scale)
     this.sprite.position.set(
       this.positionX,
-      viewport.height - SEASCAPE_PET_CONFIG.bottomInsetPx,
+      viewport.height - this.config.bottomInsetPx,
     )
   }
 
@@ -238,9 +269,9 @@ export class PetActor {
     if (!this.sprite || !this.viewport || this.positionX === null) return
     if (this.patrolMode === 'resting') {
       this.restElapsedMs += deltaMs
-      if (this.restElapsedMs < SEASCAPE_PET_CONFIG.restDurationMs) return
+      if (this.restElapsedMs < this.config.restDurationMs) return
       this.restElapsedMs = 0
-      const maximumX = this.viewport.width - SEASCAPE_PET_CONFIG.rightInsetPx
+      const maximumX = this.viewport.width - this.config.rightInsetPx
       this.patrolMode = this.positionX >= maximumX - 1
         ? 'walking-left'
         : 'walking-right'
@@ -249,10 +280,10 @@ export class PetActor {
     }
 
     const direction = this.patrolMode === 'walking-left' ? -1 : 1
-    const distance = SEASCAPE_PET_CONFIG.patrolSpeedPxPerSecond * (deltaMs / 1_000)
+    const distance = this.config.patrolSpeedPxPerSecond * (deltaMs / 1_000)
     const scale = this.sprite.scale.x
     const minimumX = this.minimumPatrolX(this.viewport, scale)
-    const maximumX = this.viewport.width - SEASCAPE_PET_CONFIG.rightInsetPx
+    const maximumX = this.viewport.width - this.config.rightInsetPx
     this.positionX = Math.min(maximumX, Math.max(minimumX, this.positionX + direction * distance))
     this.sprite.x = this.positionX
 
@@ -272,7 +303,7 @@ export class PetActor {
     const height = this.manifest!.atlas.cellHeight * this.sprite.scale.y
     return {
       left: this.positionX - width,
-      bottom: SEASCAPE_PET_CONFIG.bottomInsetPx,
+      bottom: this.config.bottomInsetPx,
       width,
       height,
     }
@@ -333,8 +364,8 @@ export class PetActor {
   private minimumPatrolX(viewport: WorldSkinViewport, scale: number): number {
     const petWidth = (this.manifest?.atlas.cellWidth ?? 0) * scale
     return Math.max(
-      petWidth + SEASCAPE_PET_CONFIG.rightInsetPx,
-      viewport.width * SEASCAPE_PET_CONFIG.patrolLeftRatio,
+      petWidth + this.config.rightInsetPx,
+      viewport.width * this.config.patrolLeftRatio,
     )
   }
 }

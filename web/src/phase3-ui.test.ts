@@ -20,13 +20,15 @@ describe('Phase 3 production UI', () => {
       },
     })
 
-    expect(wrapper.findAll('.world-skin-option')).toHaveLength(2)
+    expect(wrapper.findAll('.world-skin-option')).toHaveLength(3)
     expect(wrapper.find('.world-skin-option.classic').attributes('aria-checked')).toBe('true')
     expect(wrapper.text()).toContain('静态界面')
     expect(wrapper.text()).toContain('动态世界')
 
     await wrapper.find('.world-skin-option.seascape').trigger('click')
     expect(wrapper.emitted('select')?.[0]).toEqual(['seascape'])
+    await wrapper.find('.world-skin-option.stellar').trigger('click')
+    expect(wrapper.emitted('select')?.[1]).toEqual(['stellar'])
 
     await wrapper.setProps({
       current: 'seascape',
@@ -39,6 +41,7 @@ describe('Phase 3 production UI', () => {
       current: 'classic',
       runtimeState: { skin: 'classic', status: 'idle', error: null },
       error: '无法启动海岸世界：WebGL unavailable',
+      failedSkin: 'seascape',
     })
     expect(wrapper.find('.world-skin-option.seascape').text()).toContain('启动失败')
     expect(wrapper.find('[role="alert"]').text()).toContain('WebGL unavailable')

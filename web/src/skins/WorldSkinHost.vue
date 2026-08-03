@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   dialogueForPetEvent,
   interactionDialogue,
   PET_DIALOGUE_CONFIG,
+  type PetDialogueWorld,
   type PetDialogueContext,
 } from './pets/dialogue'
 import {
@@ -13,6 +14,7 @@ import {
   type WorldSkinViewport,
 } from './runtime'
 import type { WorldSkin } from './worldSkin'
+import { WORLD_SKIN_PRESENTATION } from './worldSkin'
 
 const props = defineProps<{
   skin: WorldSkin
@@ -28,6 +30,10 @@ const host = ref<HTMLElement | null>(null)
 const state = ref<WorldSkinRuntimeState>({ skin: props.skin, status: 'idle', error: null })
 const retryKey = ref(0)
 const dialogue = ref<string | null>(null)
+const dialogueWorld = computed<PetDialogueWorld>(() => props.skin === 'stellar' ? 'stellar' : 'seascape')
+const petInteractionLabel = computed(() => props.skin === 'stellar'
+  ? '和小航打招呼'
+  : '和星贝打招呼')
 let dialogueTimer: number | null = null
 let interactionIndex = 0
 let resizeObserver: ResizeObserver | null = null
@@ -36,6 +42,7 @@ let scrollContainer: HTMLElement | null = null
 const controller = new WorldSkinController({
   loadRuntime: async (skin) => {
     if (skin === 'seascape') return import('./seascape/runtime')
+    if (skin === 'stellar') return import('./stellar/runtime')
     throw new Error(`未注册世界皮肤：${skin}`)
   },
   onStateChange: (next) => {
@@ -67,7 +74,7 @@ const hideDialogue = () => {
 }
 
 const showDialogue = (message: string) => {
-  if (props.skin !== 'seascape') return
+  if (props.skin === 'classic') return
   hideDialogue()
   dialogue.value = message
   dialogueTimer = window.setTimeout(hideDialogue, PET_DIALOGUE_CONFIG.visibleDurationMs)
@@ -75,7 +82,7 @@ const showDialogue = (message: string) => {
 
 const interactWithPet = () => {
   controller.dispatch({ type: 'pet-interact' })
-  showDialogue(interactionDialogue(interactionIndex++, props.context))
+  showDialogue(interactionDialogue(interactionIndex++, props.context, dialogueWorld.value))
 }
 
 const syncHostToViewport = () => {
@@ -92,10 +99,10 @@ watch(() => [props.skin, retryKey.value] as const, activate)
 watch(() => props.event?.sequence, () => {
   if (!props.event) return
   controller.dispatch({ type: 'pet-state', event: props.event.event })
-  showDialogue(dialogueForPetEvent(props.event.event, props.event.sequence))
+  showDialogue(dialogueForPetEvent(props.event.event, props.event.sequence, dialogueWorld.value))
 })
 watch(() => props.skin, (skin) => {
-  if (skin !== 'seascape') hideDialogue()
+  if (skin === 'classic') hideDialogue()
 })
 
 onMounted(() => {
@@ -132,7 +139,7 @@ onBeforeUnmount(() => {
   >
     <div ref="container" class="world-skin-stage">
       <div
-        v-if="skin === 'seascape' && state.status === 'ready' && dialogue"
+        v-if="skin !== 'classic' && state.status === 'ready' && dialogue"
         class="world-skin-pet-dialogue"
         role="status"
         aria-live="polite"
@@ -140,24 +147,24 @@ onBeforeUnmount(() => {
         {{ dialogue }}
       </div>
       <button
-        v-if="skin === 'seascape' && state.status === 'ready'"
+        v-if="skin !== 'classic' && state.status === 'ready'"
         type="button"
         class="world-skin-pet-hitbox"
-        aria-label="和星贝打招呼"
-        title="和星贝打招呼"
+        :aria-label="petInteractionLabel"
+        :title="petInteractionLabel"
         @click="interactWithPet"
       />
     </div>
     <div v-if="state.status === 'loading'" class="world-skin-feedback loading" role="status">
-      <span />正在加载海岸世界…
+      <span />正在加载{{ WORLD_SKIN_PRESENTATION[skin].label }}…
     </div>
     <div v-else-if="state.status === 'error'" class="world-skin-feedback error" role="alert">
-      <strong>海岸世界启动失败</strong>
+      <strong>{{ WORLD_SKIN_PRESENTATION[skin].label }}启动失败</strong>
       <small>{{ state.error }}</small>
       <button type="button" @click="retryKey++">重试</button>
     </div>
-    <div v-else-if="skin === 'seascape'" class="world-skin-beta">
-      海岸世界运行时 · BETA
+    <div v-else-if="skin !== 'classic'" class="world-skin-beta">
+      {{ WORLD_SKIN_PRESENTATION[skin].label }}运行时 · BETA
     </div>
   </div>
 </template>

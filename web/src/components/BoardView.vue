@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { LocatedTask, ProjectSnapshot, TaskState } from '../types/protocol'
 import SeascapeBoardDecor from '../skins/seascape/SeascapeBoardDecor.vue'
+import StellarBoardDecor from '../skins/stellar/StellarBoardDecor.vue'
 import TaskCard from './TaskCard.vue'
 
 const props = defineProps<{
@@ -12,11 +13,11 @@ const props = defineProps<{
 
 defineEmits<{ open: [projectId: string, task: LocatedTask] }>()
 
-const states: Array<{ key: TaskState; label: string; terrain: string }> = [
-  { key: 'backlog', label: 'Backlog', terrain: '沙滩' },
-  { key: 'in-progress', label: 'In Progress', terrain: '潮间带' },
-  { key: 'in-review', label: 'In Review', terrain: '浅海' },
-  { key: 'done', label: 'Done', terrain: '深海' },
+const states: Array<{ key: TaskState; label: string; terrain: string; sector: string }> = [
+  { key: 'backlog', label: 'Backlog', terrain: '沙滩', sector: '星港' },
+  { key: 'in-progress', label: 'In Progress', terrain: '潮间带', sector: '巡航中' },
+  { key: 'in-review', label: 'In Review', terrain: '浅海', sector: '轨道校验' },
+  { key: 'done', label: 'Done', terrain: '深海', sector: '抵达星域' },
 ]
 
 const grouped = computed(() => {
@@ -41,6 +42,7 @@ const grouped = computed(() => {
 <template>
   <div class="board-grid" aria-label="跨项目任务看板">
     <SeascapeBoardDecor />
+    <StellarBoardDecor />
     <section
       v-for="column in grouped"
       :key="column.key"
@@ -49,7 +51,8 @@ const grouped = computed(() => {
     >
       <header class="column-header">
         <div class="column-title">
-          <small>{{ column.terrain }}</small>
+          <small class="seascape-column-label">{{ column.terrain }}</small>
+          <small class="stellar-column-label">{{ column.sector }}</small>
           <h2>{{ column.label }}</h2>
         </div>
         <span>{{ column.groups.reduce((sum, group) => sum + group.tasks.length, 0) }}</span>
