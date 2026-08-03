@@ -25,6 +25,7 @@ import {
 } from './skins/worldSkin'
 import type { WorldSkinRuntimeState } from './skins/runtime'
 import type { PetEventSignal } from './skins/runtime'
+import type { PetDialogueContext } from './skins/pets/dialogue'
 import type { PetEventId } from './skins/pets/manifest'
 import {
   hasNewlyBlockedTask,
@@ -64,6 +65,17 @@ const visibleSnapshots = computed(() => activeProject.value === 'all'
 const contextSnapshots = computed(() => activeView.value === 'projects' ? allSnapshots.value : visibleSnapshots.value)
 const diagnosticCount = computed(() => contextSnapshots.value.reduce((sum, item) => sum + item.diagnostics.length, 0))
 const taskCount = computed(() => contextSnapshots.value.reduce((sum, item) => sum + item.tasks.length, 0))
+const petContext = computed<PetDialogueContext>(() => {
+  const tasks = allSnapshots.value.flatMap((snapshot) => snapshot.tasks)
+  return {
+    projects: allSnapshots.value.length,
+    backlog: tasks.filter((task) => task.state === 'backlog').length,
+    inProgress: tasks.filter((task) => task.state === 'in-progress').length,
+    inReview: tasks.filter((task) => task.state === 'in-review').length,
+    done: tasks.filter((task) => task.state === 'done').length,
+    blocked: tasks.filter((task) => task.document.blockers.length > 0).length,
+  }
+})
 const selectedProject = computed(() => selected.value ? projectsStore.snapshots[selected.value.projectId] : null)
 const selectedTask = computed(() => selectedProject.value?.tasks.find((task) => task.document.id === selected.value?.taskId) ?? null)
 const selectedDiagnostics = computed(() => selectedTask.value && selectedProject.value
@@ -278,7 +290,12 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="main-surface">
-        <WorldSkinHost :skin="worldSkin" :event="petEvent" @state="onWorldSkinState" />
+        <WorldSkinHost
+          :skin="worldSkin"
+          :event="petEvent"
+          :context="petContext"
+          @state="onWorldSkinState"
+        />
         <div v-if="projectsStore.loading" class="loading-state"><span/><p>正在扫描项目协议…</p></div>
         <EmptyState v-else-if="!allSnapshots.length" @add="openAddProject" />
         <ProjectsView v-else-if="activeView === 'projects'" :snapshots="allSnapshots" :search="search" @open="openProjectBoard" />

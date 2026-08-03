@@ -1,5 +1,22 @@
 <template>
   <div class="seascape-board-decor" aria-hidden="true">
+    <svg class="seascape-tide-front" viewBox="0 0 220 1000" preserveAspectRatio="none">
+      <path
+        class="seascape-foam-primary"
+        d="M198-20 C171 60 207 142 181 235 C158 324 211 392 184 500 C164 590 204 655 176 760 C154 842 202 923 186 1020"
+      />
+      <path
+        class="seascape-foam-secondary"
+        d="M211-20 C189 70 218 146 200 244 C181 330 219 404 201 508 C184 600 215 666 195 770 C178 850 214 930 202 1020"
+      />
+      <g class="seascape-foam-drops">
+        <circle cx="180" cy="91" r="4"/><circle cx="195" cy="177" r="2.5"/>
+        <circle cx="169" cy="308" r="3.5"/><circle cx="199" cy="425" r="2.8"/>
+        <circle cx="173" cy="583" r="4"/><circle cx="193" cy="703" r="2.5"/>
+        <circle cx="165" cy="834" r="3.8"/><circle cx="197" cy="930" r="2.6"/>
+      </g>
+    </svg>
+
     <svg class="seascape-palm" viewBox="0 0 150 230">
       <path class="seascape-palm-trunk" d="M83 226 C79 176 88 126 75 78" />
       <g class="seascape-palm-crown">

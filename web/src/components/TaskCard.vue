@@ -13,6 +13,7 @@ const progress = () => {
 <template>
   <button
     :class="['task-card', { blocked: task.document.blockers.length, selected }]"
+    :data-task-state="task.state"
     :aria-label="`打开 ${task.document.id} ${task.document.title}`"
     @click="$emit('open')"
   >

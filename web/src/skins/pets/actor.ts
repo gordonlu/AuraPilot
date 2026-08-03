@@ -1,7 +1,6 @@
 import {
   AnimatedSprite,
-  Assets,
-  Rectangle,
+  CanvasSource,
   Texture,
   type Application,
 } from 'pixi.js'
@@ -19,7 +18,7 @@ export const SEASCAPE_PET_CONFIG = Object.freeze({
   restDurationMs: 4_800,
   referenceViewportWidth: 1200,
   baseScale: 0.72,
-  minScale: 0.52,
+  minScale: 0.38,
   maxScale: 0.82,
 })
 
@@ -41,22 +40,119 @@ const boundedScale = (viewportWidth: number): number => Math.min(
   ),
 )
 
+export const remapPatrolPosition = (
+  position: number,
+  previousMinimum: number,
+  previousMaximum: number,
+  nextMinimum: number,
+  nextMaximum: number,
+): number => {
+  const previousRange = previousMaximum - previousMinimum
+  const progress = previousRange <= 0
+    ? 1
+    : Math.min(1, Math.max(0, (position - previousMinimum) / previousRange))
+  return nextMinimum + progress * (nextMaximum - nextMinimum)
+}
+
+const frameKey = (row: number, column: number): string => `${row}:${column}`
+
 const animationFrames = (
-  texture: Texture,
+  textures: ReadonlyMap<string, Texture>,
   manifest: PetManifest,
   animation: PetAnimation,
 ) => animation.frames.map((column, index) => ({
-  texture: new Texture({
-    source: texture.source,
-    frame: new Rectangle(
-      column * manifest.atlas.cellWidth,
-      animation.row * manifest.atlas.cellHeight,
-      manifest.atlas.cellWidth,
-      manifest.atlas.cellHeight,
-    ),
-  }),
+  texture: textures.get(frameKey(animation.row, column))
+    ?? (() => { throw new Error(`宠物动画帧缺失：${animation.row}:${column}`) })(),
   time: animation.durationsMs[index],
 }))
+
+const loadAtlasImage = (url: string, signal: AbortSignal): Promise<HTMLImageElement> =>
+  new Promise((resolve, reject) => {
+    const image = new Image()
+    image.decoding = 'async'
+
+    const cleanup = () => {
+      signal.removeEventListener('abort', abort)
+      image.onload = null
+      image.onerror = null
+    }
+    const abort = () => {
+      cleanup()
+      image.src = ''
+      reject(new DOMException('宠物加载已取消', 'AbortError'))
+    }
+
+    if (signal.aborted) {
+      abort()
+      return
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    image.onload = () => {
+      cleanup()
+      resolve(image)
+    }
+    image.onerror = () => {
+      cleanup()
+      reject(new Error('宠物图集解码失败，无法显示角色'))
+    }
+    image.src = url
+  })
+
+const sliceAtlasFrames = async (
+  atlasUrl: string,
+  manifest: PetManifest,
+  signal: AbortSignal,
+): Promise<Map<string, Texture>> => {
+  const image = await loadAtlasImage(atlasUrl, signal)
+  if (image.naturalWidth !== manifest.atlas.width || image.naturalHeight !== manifest.atlas.height) {
+    throw new Error(
+      `宠物图集尺寸不匹配：期望 ${manifest.atlas.width}×${manifest.atlas.height}，`
+      + `实际 ${image.naturalWidth}×${image.naturalHeight}`,
+    )
+  }
+
+  const cells = new Set<string>()
+  for (const animation of Object.values(manifest.animations)) {
+    for (const column of animation.frames) cells.add(frameKey(animation.row, column))
+  }
+
+  const textures = new Map<string, Texture>()
+  try {
+    for (const key of cells) {
+      if (signal.aborted) throw new DOMException('宠物加载已取消', 'AbortError')
+      const [row, column] = key.split(':').map(Number)
+      const canvas = document.createElement('canvas')
+      canvas.width = manifest.atlas.cellWidth
+      canvas.height = manifest.atlas.cellHeight
+      const context = canvas.getContext('2d', { alpha: true })
+      if (!context) throw new Error('浏览器无法创建宠物 Canvas 纹理')
+      context.clearRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(
+        image,
+        column * manifest.atlas.cellWidth,
+        row * manifest.atlas.cellHeight,
+        manifest.atlas.cellWidth,
+        manifest.atlas.cellHeight,
+        0,
+        0,
+        manifest.atlas.cellWidth,
+        manifest.atlas.cellHeight,
+      )
+      textures.set(key, new Texture({
+        source: new CanvasSource({
+          resource: canvas,
+          transparent: true,
+          autoGarbageCollect: false,
+          label: `${manifest.id}-${key}`,
+        }),
+      }))
+    }
+    return textures
+  } catch (error) {
+    for (const texture of textures.values()) texture.destroy(true)
+    throw error
+  }
+}
 
 const loadManifest = async (
   packageUrl: URL,
@@ -87,14 +183,14 @@ export class PetActor {
   ): Promise<void> {
     const manifest = await loadManifest(packageUrl, signal)
     const atlasUrl = new URL(manifest.atlas.src, packageUrl).toString()
-    const atlas = await Assets.load<Texture>(atlasUrl)
+    const textures = await sliceAtlasFrames(atlasUrl, manifest, signal)
     if (signal.aborted) throw new DOMException('宠物加载已取消', 'AbortError')
 
     for (const [name, animation] of Object.entries(manifest.animations)) {
-      const frames = animationFrames(atlas, manifest, animation)
+      const frames = animationFrames(textures, manifest, animation)
       this.animations.set(name, frames)
-      this.frameTextures.push(...frames.map((frame) => frame.texture))
     }
+    this.frameTextures.push(...textures.values())
 
     const idleFrames = this.animations.get('idle')
     if (!idleFrames) throw new Error('宠物缺少 idle 动画')
@@ -115,13 +211,22 @@ export class PetActor {
 
   resize(viewport: WorldSkinViewport): void {
     if (!this.sprite) return
-    this.viewport = viewport
+    const previousViewport = this.viewport
+    const previousScale = this.sprite.scale.x
+    const previousPosition = this.positionX
     const scale = boundedScale(viewport.width)
     const maximumX = viewport.width - SEASCAPE_PET_CONFIG.rightInsetPx
     const minimumX = this.minimumPatrolX(viewport, scale)
-    this.positionX = this.positionX === null
+    this.positionX = previousPosition === null || previousViewport === null
       ? maximumX
-      : Math.min(maximumX, Math.max(minimumX, this.positionX))
+      : remapPatrolPosition(
+          previousPosition,
+          this.minimumPatrolX(previousViewport, previousScale),
+          previousViewport.width - SEASCAPE_PET_CONFIG.rightInsetPx,
+          minimumX,
+          maximumX,
+        )
+    this.viewport = viewport
     this.sprite.scale.set(scale)
     this.sprite.position.set(
       this.positionX,
@@ -221,7 +326,7 @@ export class PetActor {
     this.patrolMode = 'resting'
     this.restElapsedMs = 0
     this.animations.clear()
-    for (const texture of this.frameTextures) texture.destroy(false)
+    for (const texture of this.frameTextures) texture.destroy(true)
     this.frameTextures = []
   }
 
