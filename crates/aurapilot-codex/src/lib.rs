@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use std::collections::HashMap;
+#[cfg(unix)]
 use std::fs;
 #[cfg(unix)]
 use std::fs::OpenOptions;
@@ -311,40 +312,45 @@ impl CodexAppSession {
     }
 
     fn connect(timeout: Duration) -> Result<Self, String> {
-        ensure_managed_daemon()?;
         #[cfg(not(unix))]
-        return Err("managed Codex CLI is currently supported only on Unix platforms".into());
+        {
+            let _ = timeout;
+            Err("managed Codex CLI is currently supported only on Unix platforms".into())
+        }
         #[cfg(unix)]
-        let (socket, reader_socket) = connect_managed_socket()?;
-        let client = Arc::new(CodexClient {
-            sink: Mutex::new(Box::new(WebSocketSink(socket))),
-            pending: Mutex::new(HashMap::new()),
-            pending_changed: Condvar::new(),
-            next_request_id: AtomicU64::new(1),
-            timeout,
-        });
-        let (event_sender, events) = mpsc::channel();
-        let reader_client = client.clone();
-        std::thread::spawn(move || {
-            read_websocket_app_server(reader_socket, reader_client, event_sender)
-        });
-        let session = Self {
-            client,
-            events,
-            thread_id: String::new(),
-        };
-        session.request(
-            "initialize",
-            json!({
-                "clientInfo": {
-                    "name": "aurapilot",
-                    "title": "AuraPilot",
-                    "version": env!("CARGO_PKG_VERSION")
-                }
-            }),
-        )?;
-        session.notify("initialized", json!({}))?;
-        Ok(session)
+        {
+            ensure_managed_daemon()?;
+            let (socket, reader_socket) = connect_managed_socket()?;
+            let client = Arc::new(CodexClient {
+                sink: Mutex::new(Box::new(WebSocketSink(socket))),
+                pending: Mutex::new(HashMap::new()),
+                pending_changed: Condvar::new(),
+                next_request_id: AtomicU64::new(1),
+                timeout,
+            });
+            let (event_sender, events) = mpsc::channel();
+            let reader_client = client.clone();
+            std::thread::spawn(move || {
+                read_websocket_app_server(reader_socket, reader_client, event_sender)
+            });
+            let session = Self {
+                client,
+                events,
+                thread_id: String::new(),
+            };
+            session.request(
+                "initialize",
+                json!({
+                    "clientInfo": {
+                        "name": "aurapilot",
+                        "title": "AuraPilot",
+                        "version": env!("CARGO_PKG_VERSION")
+                    }
+                }),
+            )?;
+            session.notify("initialized", json!({}))?;
+            Ok(session)
+        }
     }
 
     pub fn start_turn(&mut self, prompt: &str) -> Result<StartedTurn, String> {

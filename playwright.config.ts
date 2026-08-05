@@ -1,6 +1,9 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const WEB_APP_URL = 'http://127.0.0.1:28727'
+// Keep this host aligned with src-tauri/tauri.conf.json and Vite's bind host.
+// On hosted Linux runners, localhost and 127.0.0.1 can resolve to different
+// address families, causing Playwright's web-server probe to time out.
+const WEB_APP_URL = 'http://localhost:28727'
 
 export default defineConfig({
   testDir: './tests/e2e',
