@@ -1,0 +1,6 @@
+{
+  "id": "aura-navigator",
+  "displayName": "小航",
+  "description": "在星际航行世界中陪伴任务推进的悬浮导航机器人。",
+  "spritesheetPath": "spritesheet.webp"
+}

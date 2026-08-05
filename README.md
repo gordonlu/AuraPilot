@@ -88,6 +88,8 @@ Ordinary packages are compressed but **not encrypted**. Password-protected packa
 
 Use pnpm exclusively for JavaScript dependencies. The committed `pnpm-lock.yaml` is authoritative.
 
+To add a visual world, follow the [World Skin Development Guide](docs/WORLD_SKIN_DEVELOPMENT.md). It documents registration, theme tokens, dynamic runtime lifecycle, optional pet packages, failure recovery, and verification requirements.
+
 ```sh
 pnpm install
 pnpm test
