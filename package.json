@@ -6,10 +6,12 @@
     "dev": "pnpm --dir web dev",
     "build": "pnpm --dir web build",
     "test": "pnpm --dir web test",
+    "test:e2e": "playwright test",
     "check": "pnpm --dir web check",
     "tauri": "node scripts/run-tauri.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tauri-apps/cli": "2.11.4"
   }
 }

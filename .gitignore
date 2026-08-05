@@ -17,6 +17,8 @@ web/dist/
 coverage/
 web/coverage/
 .vite/
+playwright-report/
+test-results/
 
 # Rust / Tauri build output
 target/
