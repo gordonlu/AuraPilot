@@ -18,6 +18,7 @@ export interface PetActorConfig {
   initialEdge?: 'left' | 'right'
   patrolSpeedPxPerSecond: number
   restDurationMs: number
+  interactionAnimation?: string
   referenceViewportWidth: number
   baseScale: number
   minScale: number
@@ -62,6 +63,7 @@ export const POLARSCAPE_PET_CONFIG: Readonly<PetActorConfig> = Object.freeze({
   initialEdge: 'left',
   patrolSpeedPxPerSecond: 28,
   restDurationMs: 5_600,
+  interactionAnimation: 'waiting',
   referenceViewportWidth: 1200,
   baseScale: 0.68,
   minScale: 0.36,
@@ -327,26 +329,28 @@ export class PetActor {
     }
   }
 
-  play(animationName: string): void {
+  play(animationName: string, loopOverride?: boolean): void {
     if (!this.sprite || !this.manifest) return
     const animation = this.manifest.animations[animationName]
     const frames = this.animations.get(animationName)
     if (!animation || !frames) return
 
     this.sprite.textures = frames
-    this.sprite.loop = animation.loop
-    this.sprite.onComplete = animation.loop
+    const loop = loopOverride ?? animation.loop
+    this.sprite.loop = loop
+    this.sprite.onComplete = loop
       ? undefined
       : () => this.play('idle')
     this.sprite.gotoAndPlay(0)
   }
 
   interact(): void {
-    const animation = this.manifest?.interactions[0]?.animation
+    const animation = this.config.interactionAnimation
+      ?? this.manifest?.interactions[0]?.animation
     if (!animation) return
     this.patrolMode = 'resting'
     this.restElapsedMs = 0
-    this.play(animation)
+    this.play(animation, false)
   }
 
   playEvent(event: PetEventId): void {

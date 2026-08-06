@@ -25,12 +25,6 @@ const SNOW_PARTICLES = Array.from({ length: SNOW_PARTICLE_COUNT }, (_, index) =>
       alt=""
       draggable="false"
     />
-    <img
-      class="polarscape-station-lights"
-      src="/skins/polarscape/background.webp"
-      alt=""
-      draggable="false"
-    />
     <div class="polarscape-floe-field">
       <img class="polarscape-floe floe-one" src="/skins/polarscape/floe-1.webp" alt="" draggable="false" />
       <img class="polarscape-floe floe-two" src="/skins/polarscape/floe-2.webp" alt="" draggable="false" />

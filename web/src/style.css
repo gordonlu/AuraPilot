@@ -581,18 +581,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   background: rgba(178, 207, 233, .69);
   box-shadow: inset 0 -1px rgba(255, 255, 255, .38);
 }
-.app-shell[data-world-skin="polarscape"] .column-header::after {
-  position: absolute;
-  z-index: 1;
-  right: 7px;
-  bottom: -7px;
-  left: 7px;
-  height: 28px;
-  background: url('/skins/polarscape/snow-cap-2.webp') center bottom / 100% 100% no-repeat;
-  filter: grayscale(.78) drop-shadow(0 2px 1px rgba(86, 127, 164, .2));
-  content: "";
-  pointer-events: none;
-}
 .app-shell[data-world-skin="polarscape"] .column-title,
 .app-shell[data-world-skin="polarscape"] .column-header > span { position: relative; z-index: 2; }
 .app-shell[data-world-skin="polarscape"] .column-title .polarscape-column-label {
@@ -616,6 +604,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   color: #55718d;
 }
 .app-shell[data-world-skin="polarscape"] .column-content { padding-top: 16px; }
+.app-shell[data-world-skin="polarscape"] .project-group { gap: 16px; }
 .app-shell[data-world-skin="polarscape"] .column-empty {
   border-color: rgba(50, 88, 126, .2);
   background: rgba(244, 249, 253, .32);
@@ -626,7 +615,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   text-shadow: 0 1px rgba(255, 255, 255, .62);
 }
 .app-shell[data-world-skin="polarscape"] .task-card {
-  padding-top: 15px;
   overflow: visible;
   border-color: rgba(61, 95, 128, .18);
   background: rgba(252, 254, 255, .95);
@@ -640,11 +628,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .app-shell[data-world-skin="polarscape"] .task-card .world-card-cap {
   position: absolute;
-  z-index: 1;
-  top: -24px;
+  z-index: 2;
+  top: auto;
   right: -2px;
+  bottom: calc(100% + 1px);
   left: -2px;
-  height: 39px;
+  height: 28px;
   display: block;
   background: url('/skins/polarscape/snow-cap-1.webp') center bottom / 100% 100% no-repeat;
   filter: grayscale(.78) drop-shadow(0 2px 1px rgba(86, 127, 164, .2));
@@ -675,8 +664,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   overflow: hidden;
   pointer-events: none;
 }
-.polarscape-landscape,
-.polarscape-station-lights {
+.polarscape-landscape {
   position: absolute;
   inset: -1.5%;
   width: 103%;
@@ -685,12 +673,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   user-select: none;
 }
 .polarscape-landscape { animation: polarscape-breathe 22s ease-in-out infinite; }
-.polarscape-station-lights {
-  clip-path: inset(57% 58% 17% 5%);
-  filter: brightness(1.1) saturate(1.08);
-  opacity: .16;
-  animation: polarscape-station-lights 13s steps(1, end) infinite;
-}
 .polarscape-floe-field,
 .polarscape-snowfall { position: absolute; inset: 0; overflow: hidden; }
 .polarscape-floe {
@@ -757,12 +739,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 @keyframes polarscape-breathe {
   0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
   50% { transform: translate3d(-5px, 2px, 0) scale(1.006); }
-}
-@keyframes polarscape-station-lights {
-  0%, 11%, 36%, 74%, 100% { opacity: .08; }
-  12%, 35%, 75%, 91% { opacity: .28; }
-  92%, 95% { opacity: .14; }
-  96%, 99% { opacity: .3; }
 }
 @keyframes polarscape-floe-one {
   0%, 100% { transform: translate3d(0, 0, 0) rotate(-1deg); }
@@ -1086,4 +1062,4 @@ input, select, textarea { width: 100%; border: 1px solid var(--border); border-r
 @media (max-width: 620px) {
   .sidebar { display: none; }.app-toolbar { height: auto; min-height: 56px; flex-wrap: wrap; padding-block: 8px; }.search-box { order: 3; flex-basis: 100%; max-width: none; }.view-switch { margin-left: auto; }.board-grid { min-width: 0; grid-template-columns: 1fr; }.board-column { border-right: 0; border-bottom: 1px solid var(--border); }.column-content { max-height: 50vh; overflow: auto; }.status-bar > span:not(.live), .status-bar button { display: none; }.task-drawer, .diagnostics-panel { width: 100%; }.onboarding-steps { grid-template-columns: 1fr; width: 100%; }.form-grid, .world-skin-grid { grid-template-columns: 1fr; }.field.full { grid-column: 1; }.blocked-view { padding: 18px 12px; }.blocked-heading { align-items: flex-start; }.blocked-heading > div { align-items: flex-start; flex-wrap: wrap; }.blocked-heading b { flex-basis: 100%; margin-left: 38px; }.transition-fields { grid-template-columns: 1fr; }.agent-grid { grid-template-columns: 1fr 1fr; }.profile-row { grid-template-columns: auto 1fr auto auto; }.profile-row .profile-kind { display: none; }.path-picker { grid-template-columns: 1fr; }.path-picker .browse-button { width: 100%; }.manual-session-form { grid-template-columns: 1fr; }.session-option { grid-template-columns: auto minmax(0, 1fr) auto; }.session-option code { display: none; }.push-modal > footer { flex-wrap: wrap; }.push-modal > footer .push-safety { flex-basis: 100%; }.session-actions { flex-wrap: wrap; }.git-branch-section { grid-template-columns: 1fr; }.git-branch-section > div, .git-branch-section > .field, .git-branch-section > p { grid-column: 1; }.git-branch-section > div { align-items: flex-start; flex-direction: column; }
 }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }.stellar-rocket, .stellar-comet { display: none; }.polarscape-station-lights { opacity: .16; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }.stellar-rocket, .stellar-comet { display: none; } }

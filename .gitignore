@@ -19,6 +19,7 @@ web/coverage/
 .vite/
 playwright-report/
 test-results/
+.playwright-mcp/
 .tmp/
 
 # Rust / Tauri build output

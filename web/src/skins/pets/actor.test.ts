@@ -15,5 +15,6 @@ describe('pet patrol placement', () => {
     expect(POLARSCAPE_PET_CONFIG.patrolLeftRatio).toBe(0.06)
     expect(POLARSCAPE_PET_CONFIG.patrolRightRatio).toBe(0.42)
     expect(POLARSCAPE_PET_CONFIG.packagePath).toBe('pets/aura-snowfox/')
+    expect(POLARSCAPE_PET_CONFIG.interactionAnimation).toBe('waiting')
   })
 })
