@@ -29,4 +29,16 @@ describe('seascape pet dialogue', () => {
       blocked: 1,
     }, 'stellar')).toContain('航路受阻')
   })
+
+  it('uses expedition language in the polar world', () => {
+    expect(dialogueForPetEvent('task-done', 0, 'polarscape')).toContain('科考站')
+    expect(interactionDialogue(0, {
+      projects: 2,
+      backlog: 1,
+      inProgress: 0,
+      inReview: 0,
+      done: 0,
+      blocked: 1,
+    }, 'polarscape')).toContain('风雪')
+  })
 })

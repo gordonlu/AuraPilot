@@ -17,6 +17,7 @@ const progress = () => {
     :aria-label="`打开 ${task.document.id} ${task.document.title}`"
     @click="$emit('open')"
   >
+    <span class="world-card-cap" aria-hidden="true" />
     <div class="task-meta-line">
       <span class="task-id">{{ task.document.id ?? '未知 ID' }}</span>
       <span :class="['priority', (task.document.priority ?? 'P3').toLowerCase()]">{{ task.document.priority ?? '—' }}</span>

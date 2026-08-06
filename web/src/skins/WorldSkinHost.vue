@@ -30,10 +30,17 @@ const host = ref<HTMLElement | null>(null)
 const state = ref<WorldSkinRuntimeState>({ skin: props.skin, status: 'idle', error: null })
 const retryKey = ref(0)
 const dialogue = ref<string | null>(null)
-const dialogueWorld = computed<PetDialogueWorld>(() => props.skin === 'stellar' ? 'stellar' : 'seascape')
-const petInteractionLabel = computed(() => props.skin === 'stellar'
-  ? '和小航打招呼'
-  : '和星贝打招呼')
+const dialogueWorld = computed<PetDialogueWorld>(() => {
+  if (props.skin === 'stellar') return 'stellar'
+  if (props.skin === 'polarscape') return 'polarscape'
+  return 'seascape'
+})
+const hasInteractivePet = computed(() => props.skin !== 'classic')
+const petInteractionLabel = computed(() => {
+  if (props.skin === 'stellar') return '和小航打招呼'
+  if (props.skin === 'polarscape') return '和雪绒打招呼'
+  return '和星贝打招呼'
+})
 let dialogueTimer: number | null = null
 let interactionIndex = 0
 let resizeObserver: ResizeObserver | null = null
@@ -43,6 +50,7 @@ const controller = new WorldSkinController({
   loadRuntime: async (skin) => {
     if (skin === 'seascape') return import('./seascape/runtime')
     if (skin === 'stellar') return import('./stellar/runtime')
+    if (skin === 'polarscape') return import('./polarscape/runtime')
     throw new Error(`未注册世界皮肤：${skin}`)
   },
   onStateChange: (next) => {
@@ -147,7 +155,7 @@ onBeforeUnmount(() => {
         {{ dialogue }}
       </div>
       <button
-        v-if="skin !== 'classic' && state.status === 'ready'"
+        v-if="hasInteractivePet && state.status === 'ready'"
         type="button"
         class="world-skin-pet-hitbox"
         :aria-label="petInteractionLabel"

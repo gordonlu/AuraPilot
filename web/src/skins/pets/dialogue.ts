@@ -9,7 +9,7 @@ export interface PetDialogueContext {
   blocked: number
 }
 
-export type PetDialogueWorld = 'seascape' | 'stellar'
+export type PetDialogueWorld = 'seascape' | 'stellar' | 'polarscape'
 
 export const PET_DIALOGUE_CONFIG = Object.freeze({
   visibleDurationMs: 4_200,
@@ -44,6 +44,24 @@ export const STELLAR_PET_DIALOGUE_CONFIG = Object.freeze({
     '新航线随时可以启程。',
     '让任务透明，比盲目加速更重要。',
     '星图很安静，但所有进展都有回声。',
+  ],
+})
+
+export const POLARSCAPE_PET_DIALOGUE_CONFIG = Object.freeze({
+  visibleDurationMs: PET_DIALOGUE_CONFIG.visibleDurationMs,
+  interactionLines: [
+    '雪线很安静，但每一步都会留下痕迹。',
+    '科考站的灯还亮着，慢慢来。',
+    '别被风雪催促，先确认下一步。',
+    '冰面会漂移，任务事实不会。',
+    '换一个 Agent，也能沿记录找到这里。',
+    '阻塞像薄冰，标清位置就不容易踩空。',
+    '我刚巡过雪原，进度都还在。',
+    '任务多的时候，先守住最重要的坐标。',
+    '极夜很长，清晰的活动记录就是灯塔。',
+    '完成一项吧，科考站会为你亮一盏灯。',
+    '我不是在发呆，只是在听雪落下。',
+    '验证结果记下来，返程时就不会迷路。',
   ],
 })
 
@@ -161,12 +179,73 @@ const STELLAR_EVENT_LINES: Readonly<Record<PetEventId, readonly string[]>> = Obj
   ],
 })
 
+const POLARSCAPE_EVENT_LINES: Readonly<Record<PetEventId, readonly string[]>> = Object.freeze({
+  'task-created': [
+    '雪原上出现了一个新任务坐标。',
+    '新任务已经写进科考日志。',
+    '又一枚路标立在雪线上了。',
+    '任务已记录，不会被风雪掩埋。',
+  ],
+  'task-started': [
+    '任务离开营地，开始穿越风雪带。',
+    '科考队出发了，我会记住来路。',
+    '执行已经开始，沿着标记继续走。',
+    '雪地上有了新的前进足迹。',
+  ],
+  'task-review': [
+    '任务抵达冰原，正在等待复核。',
+    '先检查证据，再决定是否继续前行。',
+    '成果已经送回科考站等待验收。',
+    '冰面暂时平稳，适合认真检查。',
+  ],
+  'task-done': [
+    '完成了，科考站又亮起一盏灯。',
+    '这段雪线已经安全走完。',
+    '成果归档，足迹也完整保留下来了。',
+    '任务抵达极光海，可以稍微休息一下。',
+  ],
+  'task-blocked': [
+    '前方冰层不稳，先看看阻塞原因。',
+    '任务停在风雪里，可能需要你的决定。',
+    '这里需要新的路标，阻塞信息已经留下。',
+    '不要冒险穿越，先处理最具体的障碍。',
+  ],
+  'sync-failed': [
+    '科考站通信中断，请检查同步详情。',
+    '巡测信号没有带回最新项目数据。',
+    '风雪干扰了扫描，可以安全重试。',
+    '同步信标暂时熄灭，错误信息仍然保留。',
+  ],
+  'push-started': [
+    '正在把任务坐标发送给 Agent…',
+    '科考站开始联络你选择的启动方式。',
+    '任务指令正在穿过风雪。',
+    'Push 已开始，我会留意返回信号。',
+  ],
+  'push-succeeded': [
+    'Agent 已收到任务坐标。',
+    '交接完成，科考日志仍会继续记录。',
+    '指令安全送达，接下来留意执行进度。',
+    '通信成功，我会继续守着这条雪线。',
+  ],
+  'push-failed': [
+    '信号没有送达，检查后可以安全重试。',
+    '这次 Push 被风雪打断了。',
+    '启动方式遇到问题，任务本身没有丢失。',
+    '联络失败，详细原因已经保留。',
+  ],
+})
+
 export const dialogueForPetEvent = (
   event: PetEventId,
   index = 0,
   world: PetDialogueWorld = 'seascape',
 ): string => {
-  const lines = world === 'stellar' ? STELLAR_EVENT_LINES[event] : EVENT_LINES[event]
+  const lines = world === 'stellar'
+    ? STELLAR_EVENT_LINES[event]
+    : world === 'polarscape'
+      ? POLARSCAPE_EVENT_LINES[event]
+      : EVENT_LINES[event]
   return lines[index % lines.length]
 }
 
@@ -180,6 +259,16 @@ const contextualLines = (context: PetDialogueContext, world: PetDialogueWorld): 
     if (context.done > 0) lines.push(`${context.done} 条完成航迹已经归档。`)
     if (context.projects > 1) lines.push(`我正在监测 ${context.projects} 个项目星系。`)
     if (lines.length === 0) lines.push('航行很平稳，暂时没有任务需要处理。')
+    return lines
+  }
+  if (world === 'polarscape') {
+    if (context.blocked > 0) lines.push(`${context.blocked} 个任务停在风雪里，先检查最具体的障碍。`)
+    if (context.inProgress > 0) lines.push(`${context.inProgress} 个任务正在穿越风雪带。`)
+    if (context.inReview > 0) lines.push(`${context.inReview} 个任务抵达冰原，等待复核。`)
+    if (context.backlog > 0) lines.push(`营地还有 ${context.backlog} 个任务等待出发。`)
+    if (context.done > 0) lines.push(`极光海已经收下 ${context.done} 个完成任务。`)
+    if (context.projects > 1) lines.push(`我正在巡看 ${context.projects} 个项目的雪线。`)
+    if (lines.length === 0) lines.push('雪原很平静，暂时没有任务需要处理。')
     return lines
   }
   if (context.blocked > 0) lines.push(`${context.blocked} 个任务在浅滩搁浅，先看看最具体的阻塞。`)
@@ -197,7 +286,11 @@ export const interactionDialogue = (
   context?: PetDialogueContext,
   world: PetDialogueWorld = 'seascape',
 ): string => {
-  const config = world === 'stellar' ? STELLAR_PET_DIALOGUE_CONFIG : PET_DIALOGUE_CONFIG
+  const config = world === 'stellar'
+    ? STELLAR_PET_DIALOGUE_CONFIG
+    : world === 'polarscape'
+      ? POLARSCAPE_PET_DIALOGUE_CONFIG
+      : PET_DIALOGUE_CONFIG
   const lines = context
     ? [...contextualLines(context, world), ...config.interactionLines]
     : config.interactionLines

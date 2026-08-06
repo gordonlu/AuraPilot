@@ -76,7 +76,7 @@ const statusFor = computed(() => (skin: WorldSkin): string => {
               <span>{{ WORLD_SKIN_PRESENTATION[skin].description }}</span>
             </span>
             <span class="world-skin-option-footer">
-              <span><UiIcon :name="skin === 'seascape' ? 'sun' : skin === 'stellar' ? 'compass' : 'board'" :size="14"/>{{ WORLD_SKIN_PRESENTATION[skin].motionLabel }}</span>
+              <span><UiIcon :name="skin === 'seascape' ? 'sun' : skin === 'classic' ? 'board' : 'compass'" :size="14"/>{{ WORLD_SKIN_PRESENTATION[skin].motionLabel }}</span>
               <b :class="{ active: current === skin, error: statusFor(skin) === '启动失败' }">
                 {{ statusFor(skin) }}
               </b>

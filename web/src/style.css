@@ -135,7 +135,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .main-surface { position: relative; flex: 1; min-height: 0; overflow: auto; }
 .world-skin-host { position: absolute; z-index: 0; inset: 0; overflow: hidden; pointer-events: none; }
 .world-skin-stage, .world-skin-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-.app-shell:is([data-world-skin="seascape"], [data-world-skin="stellar"]) .world-skin-host { z-index: 2; }
+.app-shell:is([data-world-skin="seascape"], [data-world-skin="stellar"], [data-world-skin="polarscape"]) .world-skin-host { z-index: 2; }
 .world-skin-feedback { position: absolute; z-index: 5; top: 10px; right: 10px; display: flex; align-items: center; gap: 7px; max-width: min(420px, calc(100% - 20px)); padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: color-mix(in srgb, var(--bg-elev) 92%, transparent); box-shadow: var(--shadow); color: var(--text-2); font-size: 10px; backdrop-filter: blur(10px); pointer-events: auto; }
 .world-skin-feedback.loading span { width: 12px; height: 12px; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 .world-skin-feedback.error { align-items: flex-start; flex-wrap: wrap; border-color: color-mix(in srgb, var(--red) 40%, var(--border)); color: var(--red); }
@@ -179,6 +179,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .group-header { display: flex; align-items: center; gap: 7px; min-height: 28px; padding: 0 5px; color: var(--text-2); }
 .group-header strong { flex: 1; overflow: hidden; text-overflow: ellipsis; font-size: 11px; white-space: nowrap; }.group-header > span:last-child { color: var(--text-3); font: 600 10px "JetBrains Mono", monospace; }
 .task-card { position: relative; width: 100%; display: flex; flex-direction: column; gap: 7px; padding: 11px 12px; overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-elev); color: var(--text-1); text-align: left; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform 100ms ease, border-color 100ms ease, box-shadow 100ms ease; }
+.world-card-cap { display: none; }
 .task-card:hover { z-index: 2; transform: translateY(-2px); border-color: var(--border-strong); box-shadow: 0 6px 18px rgba(0,0,0,.25); }.task-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 18px rgba(61,169,252,.12); }
 .task-card.blocked::before { position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--red); content: ""; }
 .task-meta-line { display: flex; align-items: center; gap: 6px; }.task-id { color: var(--text-3); font-size: 10px; font-weight: 600; }.task-card strong { font-size: 12px; line-height: 1.45; }.project-caption { color: var(--text-3); font-size: 10px; }
@@ -515,6 +516,271 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   color: #bde3e3;
 }
 
+/* Polarscape world: a quiet illustrated snowfield with an inhabited research outpost. */
+.app-shell[data-world-skin="polarscape"] {
+  --bg-base: #dce9f5;
+  --bg-elev: #fbfdff;
+  --bg-sunken: #eef5fb;
+  --bg-hover: #e4f0f9;
+  --border: rgba(50, 88, 126, .16);
+  --border-strong: rgba(50, 88, 126, .29);
+  --text-1: #26364a;
+  --text-2: #5f7188;
+  --text-3: #8291a4;
+  --accent: #3f82b3;
+  --accent-soft: rgba(63, 130, 179, .14);
+  --primary: #27384f;
+  --green: #4b9e79;
+  --yellow: #d6873e;
+  --red: #bf5548;
+  --shadow: 0 16px 44px rgba(51, 87, 121, .2);
+  color-scheme: light;
+}
+.app-shell[data-world-skin="polarscape"] .sidebar {
+  border-right-color: rgba(50, 88, 126, .15);
+  background: #edf4fa;
+}
+.app-shell[data-world-skin="polarscape"] .brand-logo { filter: drop-shadow(0 5px 12px rgba(53, 105, 148, .14)); }
+.app-shell[data-world-skin="polarscape"] .nav-row.active,
+.app-shell[data-world-skin="polarscape"] .footer-control:first-child {
+  border-color: rgba(63, 130, 179, .28);
+  background: rgba(207, 228, 245, .78);
+  color: #315f86;
+}
+.app-shell[data-world-skin="polarscape"] .app-toolbar,
+.app-shell[data-world-skin="polarscape"] .status-bar {
+  border-color: rgba(50, 88, 126, .14);
+  background: rgba(240, 247, 252, .94);
+  backdrop-filter: blur(16px);
+}
+.app-shell[data-world-skin="polarscape"] .search-box,
+.app-shell[data-world-skin="polarscape"] .view-switch { background: rgba(255, 255, 255, .78); }
+.app-shell[data-world-skin="polarscape"] .view-switch button.active,
+.app-shell[data-world-skin="polarscape"] .button.primary {
+  border-color: #27384f;
+  background: #27384f;
+  color: #fff;
+}
+.app-shell[data-world-skin="polarscape"] .main-surface { background: #c9ddf0; }
+.app-shell[data-world-skin="polarscape"] .board-grid {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: #c9ddf0;
+  color: #26364a;
+}
+.app-shell[data-world-skin="polarscape"] .board-column {
+  position: relative;
+  z-index: 1;
+  border-color: rgba(55, 91, 126, .13);
+}
+.app-shell[data-world-skin="polarscape"] .column-header {
+  height: 61px;
+  overflow: visible;
+  border-color: rgba(55, 91, 126, .13);
+  background: rgba(178, 207, 233, .69);
+  box-shadow: inset 0 -1px rgba(255, 255, 255, .38);
+}
+.app-shell[data-world-skin="polarscape"] .column-header::after {
+  position: absolute;
+  z-index: 1;
+  right: 7px;
+  bottom: -7px;
+  left: 7px;
+  height: 28px;
+  background: url('/skins/polarscape/snow-cap-2.webp') center bottom / 100% 100% no-repeat;
+  filter: grayscale(.78) drop-shadow(0 2px 1px rgba(86, 127, 164, .2));
+  content: "";
+  pointer-events: none;
+}
+.app-shell[data-world-skin="polarscape"] .column-title,
+.app-shell[data-world-skin="polarscape"] .column-header > span { position: relative; z-index: 2; }
+.app-shell[data-world-skin="polarscape"] .column-title .polarscape-column-label {
+  display: block;
+  margin-bottom: 2px;
+  color: #395c7d;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: .035em;
+}
+.app-shell[data-world-skin="polarscape"] .column-title h2 {
+  color: #7890a6;
+  font: 600 8px "JetBrains Mono", monospace;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.app-shell[data-world-skin="polarscape"] .column-header > span {
+  margin-left: auto;
+  border: 1px solid rgba(50, 88, 126, .15);
+  background: rgba(255, 255, 255, .52);
+  color: #55718d;
+}
+.app-shell[data-world-skin="polarscape"] .column-content { padding-top: 16px; }
+.app-shell[data-world-skin="polarscape"] .column-empty {
+  border-color: rgba(50, 88, 126, .2);
+  background: rgba(244, 249, 253, .32);
+  color: #70859a;
+}
+.app-shell[data-world-skin="polarscape"] .group-header {
+  color: #526a82;
+  text-shadow: 0 1px rgba(255, 255, 255, .62);
+}
+.app-shell[data-world-skin="polarscape"] .task-card {
+  padding-top: 15px;
+  overflow: visible;
+  border-color: rgba(61, 95, 128, .18);
+  background: rgba(252, 254, 255, .95);
+  color: #26364a;
+  box-shadow: 0 5px 16px rgba(55, 91, 126, .13);
+  backdrop-filter: blur(6px);
+}
+.app-shell[data-world-skin="polarscape"] .task-card:hover {
+  border-color: rgba(63, 130, 179, .42);
+  box-shadow: 0 10px 25px rgba(55, 91, 126, .2);
+}
+.app-shell[data-world-skin="polarscape"] .task-card .world-card-cap {
+  position: absolute;
+  z-index: 1;
+  top: -24px;
+  right: -2px;
+  left: -2px;
+  height: 39px;
+  display: block;
+  background: url('/skins/polarscape/snow-cap-1.webp') center bottom / 100% 100% no-repeat;
+  filter: grayscale(.78) drop-shadow(0 2px 1px rgba(86, 127, 164, .2));
+  pointer-events: none;
+}
+.app-shell[data-world-skin="polarscape"] .task-card:nth-of-type(4n + 2) .world-card-cap { background-image: url('/skins/polarscape/snow-cap-2.webp'); }
+.app-shell[data-world-skin="polarscape"] .task-card:nth-of-type(4n + 3) .world-card-cap { background-image: url('/skins/polarscape/snow-cap-3.webp'); }
+.app-shell[data-world-skin="polarscape"] .task-card:nth-of-type(4n) .world-card-cap { background-image: url('/skins/polarscape/snow-cap-4.webp'); }
+.app-shell[data-world-skin="polarscape"] .task-card[data-task-state="done"] .world-card-cap { opacity: .72; }
+.app-shell[data-world-skin="polarscape"] .task-card .task-id,
+.app-shell[data-world-skin="polarscape"] .task-card .project-caption,
+.app-shell[data-world-skin="polarscape"] .task-card .task-runtime { color: #718398; }
+.app-shell[data-world-skin="polarscape"] :is(.projects-view, .blocked-view) {
+  background: #dce9f5 url('/skins/polarscape/background.webp') center / cover fixed no-repeat;
+}
+.app-shell[data-world-skin="polarscape"] :is(.project-overview-card, .blocked-row) {
+  border-color: rgba(61, 95, 128, .17);
+  background: rgba(252, 254, 255, .94);
+  box-shadow: 0 8px 24px rgba(55, 91, 126, .14);
+}
+
+.polarscape-board-decor { display: none; }
+.app-shell[data-world-skin="polarscape"] .polarscape-board-decor {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  pointer-events: none;
+}
+.polarscape-landscape,
+.polarscape-station-lights {
+  position: absolute;
+  inset: -1.5%;
+  width: 103%;
+  height: 103%;
+  object-fit: cover;
+  user-select: none;
+}
+.polarscape-landscape { animation: polarscape-breathe 22s ease-in-out infinite; }
+.polarscape-station-lights {
+  clip-path: inset(57% 58% 17% 5%);
+  filter: brightness(1.1) saturate(1.08);
+  opacity: .16;
+  animation: polarscape-station-lights 13s steps(1, end) infinite;
+}
+.polarscape-floe-field,
+.polarscape-snowfall { position: absolute; inset: 0; overflow: hidden; }
+.polarscape-floe {
+  position: absolute;
+  height: auto;
+  opacity: .64;
+  filter: grayscale(.62) drop-shadow(0 5px 5px rgba(46, 93, 137, .14));
+  user-select: none;
+  will-change: transform;
+}
+.polarscape-floe.floe-one {
+  right: 5%;
+  bottom: 6%;
+  width: clamp(108px, 15vw, 220px);
+  animation: polarscape-floe-one 19s ease-in-out infinite;
+}
+.polarscape-floe.floe-two {
+  right: 19%;
+  bottom: 13%;
+  width: clamp(148px, 20vw, 292px);
+  opacity: .52;
+  animation: polarscape-floe-two 26s ease-in-out infinite;
+}
+.polarscape-floe.floe-three {
+  right: 34%;
+  bottom: 9%;
+  width: clamp(94px, 12vw, 176px);
+  opacity: .48;
+  animation: polarscape-floe-three 22s ease-in-out infinite;
+}
+.polarscape-snow-particle {
+  position: absolute;
+  top: -42px;
+  left: var(--polar-snow-left);
+  width: 24px;
+  height: 30px;
+  object-fit: contain;
+  opacity: .58;
+  filter: grayscale(1) brightness(1.15);
+  transform: scale(var(--polar-snow-scale));
+  animation: polarscape-snow-fall var(--polar-snow-duration) linear var(--polar-snow-delay) infinite;
+  user-select: none;
+  will-change: transform;
+}
+
+.world-skin-option.polarscape .world-skin-preview {
+  background: #c9ddf0 url('/skins/polarscape/background.webp') center 72% / cover no-repeat;
+}
+.world-skin-option.polarscape .world-skin-preview::after {
+  position: absolute;
+  inset: 0;
+  background: rgba(237, 247, 255, .13);
+  content: "";
+}
+.world-skin-option.polarscape .world-skin-preview > i,
+.world-skin-option.polarscape .world-skin-preview > b,
+.world-skin-option.polarscape .world-skin-preview > em {
+  border-color: rgba(61, 95, 128, .18);
+  background: rgba(252, 254, 255, .9);
+  box-shadow: 0 4px 10px rgba(55, 91, 126, .15);
+  transform: none;
+}
+
+@keyframes polarscape-breathe {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-5px, 2px, 0) scale(1.006); }
+}
+@keyframes polarscape-station-lights {
+  0%, 11%, 36%, 74%, 100% { opacity: .08; }
+  12%, 35%, 75%, 91% { opacity: .28; }
+  92%, 95% { opacity: .14; }
+  96%, 99% { opacity: .3; }
+}
+@keyframes polarscape-floe-one {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(-1deg); }
+  50% { transform: translate3d(-28px, 3px, 0) rotate(1deg); }
+}
+@keyframes polarscape-floe-two {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(.6deg); }
+  50% { transform: translate3d(34px, -2px, 0) rotate(-.8deg); }
+}
+@keyframes polarscape-floe-three {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(-.5deg); }
+  50% { transform: translate3d(-22px, 2px, 0) rotate(.7deg); }
+}
+@keyframes polarscape-snow-fall {
+  from { transform: translate3d(0, -42px, 0) scale(var(--polar-snow-scale)) rotate(0deg); }
+  to { transform: translate3d(var(--polar-snow-drift), calc(100vh + 70px), 0) scale(var(--polar-snow-scale)) rotate(180deg); }
+}
+
 .stellar-board-decor { display: none; }
 .app-shell[data-world-skin="stellar"] .stellar-board-decor {
   position: absolute;
@@ -820,4 +1086,4 @@ input, select, textarea { width: 100%; border: 1px solid var(--border); border-r
 @media (max-width: 620px) {
   .sidebar { display: none; }.app-toolbar { height: auto; min-height: 56px; flex-wrap: wrap; padding-block: 8px; }.search-box { order: 3; flex-basis: 100%; max-width: none; }.view-switch { margin-left: auto; }.board-grid { min-width: 0; grid-template-columns: 1fr; }.board-column { border-right: 0; border-bottom: 1px solid var(--border); }.column-content { max-height: 50vh; overflow: auto; }.status-bar > span:not(.live), .status-bar button { display: none; }.task-drawer, .diagnostics-panel { width: 100%; }.onboarding-steps { grid-template-columns: 1fr; width: 100%; }.form-grid, .world-skin-grid { grid-template-columns: 1fr; }.field.full { grid-column: 1; }.blocked-view { padding: 18px 12px; }.blocked-heading { align-items: flex-start; }.blocked-heading > div { align-items: flex-start; flex-wrap: wrap; }.blocked-heading b { flex-basis: 100%; margin-left: 38px; }.transition-fields { grid-template-columns: 1fr; }.agent-grid { grid-template-columns: 1fr 1fr; }.profile-row { grid-template-columns: auto 1fr auto auto; }.profile-row .profile-kind { display: none; }.path-picker { grid-template-columns: 1fr; }.path-picker .browse-button { width: 100%; }.manual-session-form { grid-template-columns: 1fr; }.session-option { grid-template-columns: auto minmax(0, 1fr) auto; }.session-option code { display: none; }.push-modal > footer { flex-wrap: wrap; }.push-modal > footer .push-safety { flex-basis: 100%; }.session-actions { flex-wrap: wrap; }.git-branch-section { grid-template-columns: 1fr; }.git-branch-section > div, .git-branch-section > .field, .git-branch-section > p { grid-column: 1; }.git-branch-section > div { align-items: flex-start; flex-direction: column; }
 }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }.stellar-rocket, .stellar-comet { display: none; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }.stellar-rocket, .stellar-comet { display: none; }.polarscape-station-lights { opacity: .16; } }

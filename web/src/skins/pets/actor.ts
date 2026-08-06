@@ -14,6 +14,8 @@ export interface PetActorConfig {
   rightInsetPx: number
   bottomInsetPx: number
   patrolLeftRatio: number
+  patrolRightRatio?: number
+  initialEdge?: 'left' | 'right'
   patrolSpeedPxPerSecond: number
   restDurationMs: number
   referenceViewportWidth: number
@@ -48,6 +50,22 @@ export const STELLAR_PET_CONFIG: Readonly<PetActorConfig> = Object.freeze({
   baseScale: 0.72,
   minScale: 0.38,
   maxScale: 0.82,
+})
+
+export const POLARSCAPE_PET_CONFIG: Readonly<PetActorConfig> = Object.freeze({
+  packagePath: 'pets/aura-snowfox/',
+  manifestFile: 'pet.json',
+  rightInsetPx: 28,
+  bottomInsetPx: 18,
+  patrolLeftRatio: 0.06,
+  patrolRightRatio: 0.42,
+  initialEdge: 'left',
+  patrolSpeedPxPerSecond: 28,
+  restDurationMs: 5_600,
+  referenceViewportWidth: 1200,
+  baseScale: 0.68,
+  minScale: 0.36,
+  maxScale: 0.78,
 })
 
 type PetPatrolMode = 'resting' | 'walking-left' | 'walking-right'
@@ -246,14 +264,14 @@ export class PetActor {
     const previousScale = this.sprite.scale.x
     const previousPosition = this.positionX
     const scale = boundedScale(viewport.width, this.config)
-    const maximumX = viewport.width - this.config.rightInsetPx
+    const maximumX = this.maximumPatrolX(viewport)
     const minimumX = this.minimumPatrolX(viewport, scale)
     this.positionX = previousPosition === null || previousViewport === null
-      ? maximumX
+      ? this.config.initialEdge === 'left' ? minimumX : maximumX
       : remapPatrolPosition(
           previousPosition,
           this.minimumPatrolX(previousViewport, previousScale),
-          previousViewport.width - this.config.rightInsetPx,
+          this.maximumPatrolX(previousViewport),
           minimumX,
           maximumX,
         )
@@ -271,7 +289,7 @@ export class PetActor {
       this.restElapsedMs += deltaMs
       if (this.restElapsedMs < this.config.restDurationMs) return
       this.restElapsedMs = 0
-      const maximumX = this.viewport.width - this.config.rightInsetPx
+      const maximumX = this.maximumPatrolX(this.viewport)
       this.patrolMode = this.positionX >= maximumX - 1
         ? 'walking-left'
         : 'walking-right'
@@ -283,7 +301,7 @@ export class PetActor {
     const distance = this.config.patrolSpeedPxPerSecond * (deltaMs / 1_000)
     const scale = this.sprite.scale.x
     const minimumX = this.minimumPatrolX(this.viewport, scale)
-    const maximumX = this.viewport.width - this.config.rightInsetPx
+    const maximumX = this.maximumPatrolX(this.viewport)
     this.positionX = Math.min(maximumX, Math.max(minimumX, this.positionX + direction * distance))
     this.sprite.x = this.positionX
 
@@ -366,6 +384,16 @@ export class PetActor {
     return Math.max(
       petWidth + this.config.rightInsetPx,
       viewport.width * this.config.patrolLeftRatio,
+    )
+  }
+
+  private maximumPatrolX(viewport: WorldSkinViewport): number {
+    return Math.max(
+      this.minimumPatrolX(viewport, this.sprite?.scale.x ?? this.config.minScale),
+      Math.min(
+        viewport.width - this.config.rightInsetPx,
+        viewport.width * (this.config.patrolRightRatio ?? 1),
+      ),
     )
   }
 }

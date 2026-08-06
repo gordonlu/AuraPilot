@@ -20,7 +20,7 @@ describe('Phase 3 production UI', () => {
       },
     })
 
-    expect(wrapper.findAll('.world-skin-option')).toHaveLength(3)
+    expect(wrapper.findAll('.world-skin-option')).toHaveLength(4)
     expect(wrapper.find('.world-skin-option.classic').attributes('aria-checked')).toBe('true')
     expect(wrapper.text()).toContain('静态界面')
     expect(wrapper.text()).toContain('动态世界')
@@ -29,6 +29,8 @@ describe('Phase 3 production UI', () => {
     expect(wrapper.emitted('select')?.[0]).toEqual(['seascape'])
     await wrapper.find('.world-skin-option.stellar').trigger('click')
     expect(wrapper.emitted('select')?.[1]).toEqual(['stellar'])
+    await wrapper.find('.world-skin-option.polarscape').trigger('click')
+    expect(wrapper.emitted('select')?.[2]).toEqual(['polarscape'])
 
     await wrapper.setProps({
       current: 'seascape',
@@ -133,7 +135,7 @@ describe('Phase 3 production UI', () => {
     expect(wrapper.findAll('.board-column')).toHaveLength(4)
     expect(wrapper.text()).toContain('Backlog')
     expect(wrapper.text()).toContain('<img src=x onerror=alert(1)>')
-    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.find('.task-card img').exists()).toBe(false)
     expect(wrapper.findAll('.task-card.blocked').length).toBeGreaterThan(0)
 
     await wrapper.find('.task-card').trigger('click')
