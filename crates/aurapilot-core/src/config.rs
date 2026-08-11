@@ -18,6 +18,9 @@ pub struct CoreConfig {
     pub profile_format_version: u32,
     pub push_attempt_format_version: u32,
     pub push_attempt_retention: usize,
+    pub execution_event_retention: usize,
+    pub execution_event_message_max_bytes: usize,
+    pub execution_event_detail_max_bytes: usize,
     pub max_profile_args: usize,
     pub max_profile_value_bytes: usize,
     pub max_profile_id_bytes: usize,
@@ -54,6 +57,9 @@ impl Default for CoreConfig {
             profile_format_version: 1,
             push_attempt_format_version: 1,
             push_attempt_retention: 100,
+            execution_event_retention: 2_000,
+            execution_event_message_max_bytes: 2_048,
+            execution_event_detail_max_bytes: 16_384,
             max_profile_args: 64,
             max_profile_value_bytes: 16_384,
             max_profile_id_bytes: 64,
@@ -94,6 +100,9 @@ mod tests {
         assert_eq!(config.profile_format_version, 1);
         assert_eq!(config.push_attempt_format_version, 1);
         assert_eq!(config.push_attempt_retention, 100);
+        assert_eq!(config.execution_event_retention, 2_000);
+        assert_eq!(config.execution_event_message_max_bytes, 2_048);
+        assert_eq!(config.execution_event_detail_max_bytes, 16_384);
         assert_eq!(config.max_profile_args, 64);
         assert_eq!(config.max_profile_value_bytes, 16_384);
         assert_eq!(config.max_profile_id_bytes, 64);

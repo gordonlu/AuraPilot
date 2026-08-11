@@ -73,8 +73,8 @@ impl OpenCodeServer {
             match wait_for_health(
                 &mut child,
                 &client,
-                request_timeout,
                 health_check_timeout,
+                request_timeout,
                 status_poll_interval,
             ) {
                 Ok(()) => {
@@ -175,6 +175,10 @@ impl OpenCodeServer {
                 }
             }
         }
+    }
+
+    pub fn session_messages(&self, session_id: &str) -> Result<Value, String> {
+        self.client.session_messages(session_id)
     }
 }
 
@@ -349,11 +353,16 @@ impl OpenCodeClient {
         message_id: &str,
     ) -> Result<MessageCompletion, String> {
         validate_path_id(session_id)?;
-        let messages = self.get(
+        let messages = self.session_messages(session_id)?;
+        message_completion(&messages, message_id)
+    }
+
+    fn session_messages(&self, session_id: &str) -> Result<Value, String> {
+        validate_path_id(session_id)?;
+        self.get(
             &format!("/session/{session_id}/message"),
             "list Session messages",
-        )?;
-        message_completion(&messages, message_id)
+        )
     }
 }
 
@@ -475,6 +484,7 @@ fn truncate(value: &str, max_bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::io::{Read, Write};
     use std::sync::mpsc;
     use tempfile::tempdir;
@@ -634,6 +644,66 @@ mod tests {
         let error = client(base_url).create_session("TASK-001").unwrap_err();
         assert!(error.contains("HTTP 500 Internal Server Error"));
         assert!(error.ends_with('…'));
+    }
+
+    #[test]
+    fn adapter_contract_rejects_a_session_response_without_an_id() {
+        let (base_url, _) = serve_once("200 OK", r#"{"title":"missing id"}"#);
+        let error = client(base_url).create_session("TASK-001").unwrap_err();
+        assert_eq!(error, "OpenCode create Session response did not contain id");
+    }
+
+    #[test]
+    fn adapter_contract_reports_missing_executable_without_touching_the_repository() {
+        let repository = tempdir().unwrap();
+        let marker = repository.path().join("task.yaml");
+        fs::write(&marker, "state: backlog\n").unwrap();
+        let before = fs::read(&marker).unwrap();
+        let missing = repository.path().join("missing-opencode-executable");
+
+        let error = match OpenCodeServer::start(
+            repository.path(),
+            &missing,
+            Duration::from_millis(50),
+            Duration::from_millis(50),
+            Duration::from_millis(1),
+            1,
+            256,
+        ) {
+            Ok(_) => panic!("missing OpenCode executable unexpectedly started"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("failed to start OpenCode Server"));
+        assert_eq!(fs::read(&marker).unwrap(), before);
+    }
+
+    #[test]
+    fn adapter_contract_reports_a_server_that_exits_before_becoming_ready() {
+        let repository = tempdir().unwrap();
+        let executable = std::env::current_exe().unwrap();
+
+        let error = match OpenCodeServer::start(
+            repository.path(),
+            &executable,
+            Duration::from_millis(20),
+            Duration::from_secs(1),
+            Duration::from_millis(1),
+            1,
+            256,
+        ) {
+            Ok(_) => panic!("non-OpenCode executable unexpectedly became ready"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error.contains("OpenCode Server did not become ready"),
+            "{error}"
+        );
+        assert!(
+            error.contains("OpenCode Server exited with status"),
+            "{error}"
+        );
     }
 
     #[test]

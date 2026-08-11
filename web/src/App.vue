@@ -8,6 +8,7 @@ import BlockedView from './components/BlockedView.vue'
 import BoardView from './components/BoardView.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import DiagnosticsPanel from './components/DiagnosticsPanel.vue'
+import ExecutionCenter from './components/ExecutionCenter.vue'
 import EmptyState from './components/EmptyState.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
 import TaskFormModal from './components/TaskFormModal.vue'
@@ -52,7 +53,7 @@ let petEventSequence = 0
 let blockedTaskState: BlockedTaskState = new Map()
 let blockedTaskBaselineReady = false
 const selected = ref<{ projectId: string; taskId: string } | null>(null)
-const modal = ref<'create' | 'edit' | 'add-project' | 'delete' | 'push' | 'profiles' | 'transfer' | 'world-skins' | null>(null)
+const modal = ref<'create' | 'edit' | 'add-project' | 'delete' | 'push' | 'profiles' | 'transfer' | 'world-skins' | 'execution' | null>(null)
 const showDiagnostics = ref(false)
 const busy = ref(false)
 const actionError = ref<string | null>(null)
@@ -85,6 +86,7 @@ const selectedDiagnostics = computed(() => selectedTask.value && selectedProject
   ? selectedProject.value.diagnostics.filter((item) => item.path === selectedTask.value?.path)
   : [])
 const selectedKey = computed(() => selected.value ? `${selected.value.projectId}:${selected.value.taskId}` : null)
+const activeAgentRuns = computed(() => agentsStore.pushAttempts.filter((attempt) => ['requested', 'started'].includes(attempt.status)).length)
 
 const selectTask = (projectId: string, task: LocatedTask) => {
   if (!task.document.id) return
@@ -95,6 +97,12 @@ const openProjectBoard = (projectId: string) => {
   activeProject.value = projectId
   activeView.value = 'board'
   search.value = ''
+}
+const openTaskFromExecution = (projectId: string, taskId: string) => {
+  modal.value = null
+  activeProject.value = projectId
+  activeView.value = 'board'
+  selected.value = { projectId, taskId }
 }
 const closeOverlays = () => { modal.value = null; selected.value = null; showDiagnostics.value = false; actionError.value = null }
 const toggleTheme = () => {
@@ -274,6 +282,7 @@ onBeforeUnmount(() => {
         <div class="current-project"><UiIcon name="folder"/><span>{{ activeView === 'projects' ? '项目一览' : activeProject === 'all' ? '所有项目' : visibleSnapshots[0]?.project?.name }}</span><b>{{ activeView === 'projects' ? allSnapshots.length : taskCount }}</b></div>
         <label class="search-box"><UiIcon name="search"/><input id="task-search" v-model="search" :placeholder="activeView === 'projects' ? '搜索项目名称或路径…' : '搜索任务或 ID…'"/><kbd>/</kbd></label>
         <div class="view-switch"><button :class="{ active: activeView === 'projects' }" @click="activeView = 'projects'"><UiIcon name="folder"/>项目</button><button :class="{ active: activeView === 'board' }" @click="activeView = 'board'"><UiIcon name="board"/>看板</button><button :class="{ active: activeView === 'blocked' }" @click="activeView = 'blocked'"><UiIcon name="alert"/>阻塞</button></div>
+        <button :class="['button', 'execution-button', { active: activeAgentRuns > 0 }]" @click="modal = 'execution'"><UiIcon name="terminal"/><span>执行</span><b>{{ activeAgentRuns }}</b></button>
         <button class="button primary" :disabled="!allSnapshots.length" @click="modal = 'create'"><UiIcon name="plus"/>新建任务</button>
       </header>
 
@@ -316,6 +325,10 @@ onBeforeUnmount(() => {
       @close="selected = null" @edit="modal = 'edit'" @delete="modal = 'delete'" @push="modal = 'push'" @transition="transitionTask"
     />
     <DiagnosticsPanel v-if="showDiagnostics" :snapshots="visibleSnapshots" @close="showDiagnostics = false" />
+    <ExecutionCenter
+      v-if="modal === 'execution'" :snapshots="allSnapshots" :active-project="activeProject"
+      @close="modal = null" @open-task="openTaskFromExecution"
+    />
     <TaskFormModal
       v-if="modal === 'create' || (modal === 'edit' && selectedTask)" :mode="modal === 'edit' ? 'edit' : 'create'"
       :projects="allSnapshots" :project-id="selected?.projectId ?? (activeProject === 'all' ? '' : activeProject)"

@@ -154,7 +154,7 @@ export interface PointerPrompt {
   text: string
 }
 
-export type PushAttemptStatus = 'requested' | 'started' | 'failed_to_start' | 'exited'
+export type PushAttemptStatus = 'requested' | 'started' | 'failed_to_start' | 'exited' | 'status_unknown'
 export type PushDelivery = 'process' | 'clipboard' | 'clipboard_fallback'
 
 export interface PushAttempt {
@@ -174,6 +174,27 @@ export interface PushOutcome {
   pointer_prompt: PointerPrompt
   message: string
   session?: AgentSessionBinding | null
+}
+
+export type ExecutionEventKind =
+  | 'lifecycle' | 'command' | 'file_change' | 'agent_message'
+  | 'reasoning' | 'approval' | 'provider' | 'error' | string
+export type ExecutionEventLevel = 'info' | 'success' | 'warning' | 'error' | string
+
+export interface ExecutionEvent {
+  id: string
+  project_id: string
+  task_id: string
+  profile_id: string
+  provider: AgentProvider
+  session_binding_id: string | null
+  attempt_id: string | null
+  kind: ExecutionEventKind
+  level: ExecutionEventLevel
+  phase: string
+  message: string
+  detail: string | null
+  created_at: string
 }
 
 export interface GitWorkspaceStatus {

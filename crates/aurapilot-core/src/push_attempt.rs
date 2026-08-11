@@ -15,6 +15,7 @@ pub enum PushAttemptStatus {
     Started,
     FailedToStart,
     Exited,
+    StatusUnknown,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -136,6 +137,28 @@ impl PushAttemptStore {
         self.document = next;
         Ok(updated)
     }
+
+    pub fn recover_started_as_unknown(&mut self) -> Result<usize, PushAttemptError> {
+        let mut next = self.document.clone();
+        let mut recovered = 0;
+        for attempt in &mut next.attempts {
+            if attempt.status != PushAttemptStatus::Started {
+                continue;
+            }
+            attempt.status = PushAttemptStatus::StatusUnknown;
+            attempt.process_id = None;
+            attempt.error = Some(
+                "AuraPilot restarted while this Agent was running; inspect the Provider Session, task file, and Git workspace before retrying"
+                    .into(),
+            );
+            recovered += 1;
+        }
+        if recovered > 0 {
+            persist_document(&self.path, &next)?;
+            self.document = next;
+        }
+        Ok(recovered)
+    }
 }
 
 fn trim_to_retention(attempts: &mut Vec<PushAttempt>, retention: usize) {
@@ -210,5 +233,32 @@ mod tests {
         assert!(!source.contains("pointer prompt"));
         let loaded = PushAttemptStore::load(&path, config).unwrap();
         assert_eq!(loaded.attempts().last().unwrap().process_id, Some(42));
+    }
+
+    #[test]
+    fn restart_marks_unfinished_started_attempts_as_unknown_instead_of_active() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("attempts.json");
+        let config = CoreConfig::default();
+        let mut store = PushAttemptStore::load(&path, config.clone()).unwrap();
+        let attempt = store
+            .requested(Uuid::new_v4(), "TASK-001", "codex")
+            .unwrap();
+        store
+            .update(
+                attempt.id,
+                PushAttemptStatus::Started,
+                Some(42),
+                None,
+                PushDelivery::Process,
+            )
+            .unwrap();
+
+        let mut reloaded = PushAttemptStore::load(&path, config).unwrap();
+        assert_eq!(reloaded.recover_started_as_unknown().unwrap(), 1);
+        let recovered = &reloaded.attempts()[0];
+        assert_eq!(recovered.status, PushAttemptStatus::StatusUnknown);
+        assert_eq!(recovered.process_id, None);
+        assert!(recovered.error.as_deref().unwrap().contains("restarted"));
     }
 }

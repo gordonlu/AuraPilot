@@ -32,7 +32,11 @@ impl AppState {
         let config = CoreConfig::default();
         let registry = ProjectRegistry::load(registry_path()?, config.clone())?;
         let profiles = AgentProfileRegistry::load(profile_path()?, config.clone())?;
-        let push_attempts = PushAttemptStore::load(push_attempt_path()?, config.clone())?;
+        let mut push_attempts = PushAttemptStore::load(push_attempt_path()?, config.clone())?;
+        let unknown_attempts = push_attempts.recover_started_as_unknown()?;
+        if unknown_attempts > 0 {
+            eprintln!("marked {unknown_attempts} unfinished Agent attempts as status_unknown");
+        }
         let mut runtime = RuntimeStore::open(runtime_database_path()?, &config)?;
         let recovered = runtime.recover_interrupted_deliveries()?;
         if recovered > 0 {

@@ -57,6 +57,12 @@ The desktop Push flow can also execute a task in a background Agent Session. Thi
 
 > **Beta:** background execution may be unstable and generally consumes more tokens because its context is independent from your current foreground conversation. Review the selected Session, task activity log, Git diff, and verification evidence before accepting its result.
 
+### Execution center
+
+Open **执行** in the desktop toolbar to inspect persisted Push/Run status and Provider events across projects. Codex background runs expose Turn lifecycle, commands, file-change events, Agent messages, approval boundaries, completion, and failures. OpenCode currently exposes lifecycle and the final assistant response. External interactive terminals can only report process launch and exit because they do not provide AuraPilot with a structured event stream.
+
+Execution events are stored only in AuraPilot's local SQLite runtime database with bounded retention. Prompt/input fields are redacted from persisted raw Provider details. These events are operational evidence, not task state: `.aurapilot/tasks/` remains the source of truth, and users should still inspect task logs, Git changes, and verification output before accepting a result.
+
 ## Portable task packages
 
 Use `.aura` packages to move task records that you do not want to send through Git. Import always starts with a version, integrity, schema, path-safety, and conflict preview; applying the import requires the SHA-256 printed by that preview. Existing task files are never overwritten.
@@ -96,5 +102,7 @@ pnpm test
 pnpm build
 cargo test -p aurapilot-core
 ```
+
+`pnpm dev` opens the browser-only frontend with an empty project list because it cannot access the desktop filesystem. Append `?demo=1` to the local URL only when intentionally previewing the built-in demo projects. Use `pnpm tauri dev` for real local projects.
 
 The Bootstrap document is validated only in an isolated repository during Phase 5. It must not be executed against this repository during normal development.

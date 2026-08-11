@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -297,6 +297,38 @@ pub struct PushRecord {
     pub delivered_at: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ExecutionEvent {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub task_id: String,
+    pub profile_id: String,
+    pub provider: AgentProvider,
+    pub session_binding_id: Option<Uuid>,
+    pub attempt_id: Option<Uuid>,
+    pub kind: String,
+    pub level: String,
+    pub phase: String,
+    pub message: String,
+    pub detail: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct NewExecutionEvent<'a> {
+    pub project_id: Uuid,
+    pub task_id: &'a str,
+    pub profile_id: &'a str,
+    pub provider: AgentProvider,
+    pub session_binding_id: Option<Uuid>,
+    pub attempt_id: Option<Uuid>,
+    pub kind: &'a str,
+    pub level: &'a str,
+    pub phase: &'a str,
+    pub message: &'a str,
+    pub detail: Option<&'a str>,
+}
+
 #[derive(Clone, Debug)]
 pub struct NewSessionBinding<'a> {
     pub project_id: Uuid,
@@ -353,6 +385,9 @@ pub enum RuntimeStoreError {
 
 pub struct RuntimeStore {
     connection: Connection,
+    execution_event_retention: usize,
+    execution_event_message_max_bytes: usize,
+    execution_event_detail_max_bytes: usize,
 }
 
 impl RuntimeStore {
@@ -367,7 +402,12 @@ impl RuntimeStore {
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "FULL")?;
         connection.busy_timeout(config.sqlite_busy_timeout)?;
-        let mut store = Self { connection };
+        let mut store = Self {
+            connection,
+            execution_event_retention: config.execution_event_retention,
+            execution_event_message_max_bytes: config.execution_event_message_max_bytes,
+            execution_event_detail_max_bytes: config.execution_event_detail_max_bytes,
+        };
         store.migrate()?;
         Ok(store)
     }
@@ -394,6 +434,13 @@ impl RuntimeStore {
         }
         if current < 2 {
             tx.execute_batch(include_str!("../migrations/0002_push_inbox.sql"))?;
+            tx.execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?1, ?2)",
+                params![2, now()],
+            )?;
+        }
+        if current < 3 {
+            tx.execute_batch(include_str!("../migrations/0003_execution_events.sql"))?;
             tx.execute(
                 "INSERT INTO schema_migrations(version, applied_at) VALUES (?1, ?2)",
                 params![SCHEMA_VERSION, now()],
@@ -911,6 +958,95 @@ impl RuntimeStore {
             .optional()
             .map_err(Into::into)
     }
+
+    pub fn append_execution_event(
+        &mut self,
+        input: NewExecutionEvent<'_>,
+    ) -> Result<ExecutionEvent, RuntimeStoreError> {
+        let event = ExecutionEvent {
+            id: Uuid::new_v4(),
+            project_id: input.project_id,
+            task_id: input.task_id.to_owned(),
+            profile_id: input.profile_id.to_owned(),
+            provider: input.provider,
+            session_binding_id: input.session_binding_id,
+            attempt_id: input.attempt_id,
+            kind: input.kind.to_owned(),
+            level: input.level.to_owned(),
+            phase: input.phase.to_owned(),
+            message: truncate_utf8(input.message, self.execution_event_message_max_bytes),
+            detail: input
+                .detail
+                .map(|value| truncate_utf8(value, self.execution_event_detail_max_bytes)),
+            created_at: now(),
+        };
+        let tx = self.connection.transaction()?;
+        tx.execute(
+            "INSERT INTO execution_events (
+                id, project_id, task_id, profile_id, provider, session_binding_id,
+                attempt_id, kind, level, phase, message, detail, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                event.id.to_string(),
+                event.project_id.to_string(),
+                event.task_id,
+                event.profile_id,
+                event.provider.as_str(),
+                event.session_binding_id.map(|value| value.to_string()),
+                event.attempt_id.map(|value| value.to_string()),
+                event.kind,
+                event.level,
+                event.phase,
+                event.message,
+                event.detail,
+                event.created_at,
+            ],
+        )?;
+        tx.execute(
+            "DELETE FROM execution_events
+             WHERE project_id = ?1 AND id NOT IN (
+                SELECT id FROM execution_events WHERE project_id = ?1
+                ORDER BY created_at DESC, rowid DESC LIMIT ?2
+             )",
+            params![
+                input.project_id.to_string(),
+                self.execution_event_retention as i64
+            ],
+        )?;
+        tx.commit()?;
+        Ok(event)
+    }
+
+    pub fn list_execution_events(
+        &self,
+        project_id: Option<Uuid>,
+        task_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ExecutionEvent>, RuntimeStoreError> {
+        let limit = limit.min(self.execution_event_retention) as i64;
+        let project = project_id.map(|value| value.to_string());
+        let mut statement = self.connection.prepare(
+            "SELECT id, project_id, task_id, profile_id, provider, session_binding_id,
+                    attempt_id, kind, level, phase, message, detail, created_at
+             FROM execution_events
+             WHERE (?1 IS NULL OR project_id = ?1)
+               AND (?2 IS NULL OR task_id = ?2)
+             ORDER BY created_at DESC, rowid DESC LIMIT ?3",
+        )?;
+        let rows = statement.query_map(params![project, task_id, limit], map_execution_event)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+}
+
+fn truncate_utf8(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_owned();
+    }
+    let mut end = max_bytes.min(value.len());
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &value[..end])
 }
 
 fn now() -> String {
@@ -1122,6 +1258,43 @@ fn map_push(row: &rusqlite::Row<'_>) -> rusqlite::Result<PushRecord> {
     })
 }
 
+fn map_execution_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<ExecutionEvent> {
+    let parse_uuid = |index: usize, value: String| {
+        Uuid::parse_str(&value).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                index,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })
+    };
+    let parse_optional_uuid = |index: usize, value: Option<String>| {
+        value.map(|value| parse_uuid(index, value)).transpose()
+    };
+    let provider: String = row.get(4)?;
+    Ok(ExecutionEvent {
+        id: parse_uuid(0, row.get(0)?)?,
+        project_id: parse_uuid(1, row.get(1)?)?,
+        task_id: row.get(2)?,
+        profile_id: row.get(3)?,
+        provider: AgentProvider::parse(&provider).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                4,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
+        session_binding_id: parse_optional_uuid(5, row.get(5)?)?,
+        attempt_id: parse_optional_uuid(6, row.get(6)?)?,
+        kind: row.get(7)?,
+        level: row.get(8)?,
+        phase: row.get(9)?,
+        message: row.get(10)?,
+        detail: row.get(11)?,
+        created_at: row.get(12)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1148,6 +1321,74 @@ mod tests {
                 .connection
                 .query_row("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn execution_events_are_persisted_filtered_truncated_and_retained() {
+        let dir = tempdir().unwrap();
+        let config = CoreConfig {
+            execution_event_retention: 2,
+            execution_event_message_max_bytes: 8,
+            execution_event_detail_max_bytes: 10,
+            ..CoreConfig::default()
+        };
+        let mut store = RuntimeStore::open(dir.path().join("runtime.sqlite3"), &config).unwrap();
+        let first_project = Uuid::new_v4();
+        let second_project = Uuid::new_v4();
+        for (index, task) in ["TASK-001", "TASK-001", "TASK-002"].into_iter().enumerate() {
+            store
+                .append_execution_event(NewExecutionEvent {
+                    project_id: first_project,
+                    task_id: task,
+                    profile_id: "codex",
+                    provider: AgentProvider::Codex,
+                    session_binding_id: None,
+                    attempt_id: None,
+                    kind: "lifecycle",
+                    level: "info",
+                    phase: "turn",
+                    message: &format!("event-{index}-long"),
+                    detail: Some("0123456789-long"),
+                })
+                .unwrap();
+        }
+        store
+            .append_execution_event(NewExecutionEvent {
+                project_id: second_project,
+                task_id: "TASK-900",
+                profile_id: "opencode",
+                provider: AgentProvider::OpenCode,
+                session_binding_id: None,
+                attempt_id: None,
+                kind: "diagnostic",
+                level: "warning",
+                phase: "provider",
+                message: "separate project",
+                detail: None,
+            })
+            .unwrap();
+
+        let retained = store
+            .list_execution_events(Some(first_project), None, 20)
+            .unwrap();
+        assert_eq!(retained.len(), 2);
+        assert!(retained.iter().all(|event| event.message.len() <= 11));
+        assert!(
+            retained
+                .iter()
+                .all(|event| event.detail.as_deref() == Some("0123456789…"))
+        );
+        assert_eq!(
+            store
+                .list_execution_events(Some(first_project), Some("TASK-001"), 20)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store.list_execution_events(None, None, 20).unwrap().len(),
             2
         );
     }
@@ -1193,7 +1434,7 @@ mod tests {
         drop(connection);
 
         let store = RuntimeStore::open(&path, &CoreConfig::default()).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 2);
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
         let index_count: i64 = store
             .connection
             .query_row(
@@ -1204,6 +1445,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(index_count, 1);
+        let event_table_count: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name = 'execution_events'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_table_count, 1);
     }
 
     #[test]

@@ -51,7 +51,7 @@ export const useProjectsStore = defineStore('projects', {
   actions: {
     async load() {
       if (!isTauri()) {
-        if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('empty') !== '1') {
+        if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('demo') === '1') {
           const snapshots = demoSnapshots()
           this.projects = snapshots.map((snapshot) => snapshot.registration)
           this.snapshots = Object.fromEntries(

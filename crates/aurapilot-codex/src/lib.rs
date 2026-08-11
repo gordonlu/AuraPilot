@@ -373,11 +373,20 @@ impl CodexAppSession {
     }
 
     pub fn wait_for_turn(&mut self, turn_id: &str) -> Result<(), String> {
+        self.wait_for_turn_observing(turn_id, |_| {})
+    }
+
+    pub fn wait_for_turn_observing(
+        &mut self,
+        turn_id: &str,
+        mut observe: impl FnMut(&Value),
+    ) -> Result<(), String> {
         loop {
             let message = self
                 .events
                 .recv()
                 .map_err(|_| "Codex App Server event stream closed unexpectedly".to_owned())?;
+            observe(&message);
             if message.get("method").and_then(Value::as_str) == Some("turn/completed") {
                 let completed_id = message.pointer("/params/turn/id").and_then(Value::as_str);
                 if completed_id == Some(turn_id) {
@@ -605,6 +614,12 @@ fn read_websocket_app_server(
                 return;
             }
         };
+        if message.get("id").is_some()
+            && message.get("method").and_then(Value::as_str).is_some()
+            && events.send(message.clone()).is_err()
+        {
+            return;
+        }
         match client.resolve(&message) {
             Ok(true) => {}
             Ok(false) => {
@@ -793,6 +808,92 @@ mod tests {
         assert_eq!(messages[2]["method"], "turn/start");
         assert_eq!(messages[2]["params"]["threadId"], "thr_existing");
         assert_eq!(messages[2]["params"]["input"][0]["text"], "pointer");
+    }
+
+    #[test]
+    fn adapter_contract_starts_a_thread_and_keeps_the_pointer_in_the_turn() {
+        let responses = concat!(
+            "{\"id\":1,\"result\":{\"thread\":{\"id\":\"thr_new\"}}}\n",
+            "{\"id\":2,\"result\":{\"turn\":{\"id\":\"turn_new\"}}}\n"
+        );
+        let mut reader = Cursor::new(responses.as_bytes());
+        let mut writer = Vec::new();
+        let mut next_id = 1;
+
+        let thread = request_io(
+            &mut reader,
+            &mut writer,
+            &mut next_id,
+            "thread/start",
+            json!({ "cwd": "/repo with spaces", "serviceName": "aurapilot" }),
+        )
+        .unwrap();
+        let thread_id = thread
+            .pointer("/thread/id")
+            .and_then(Value::as_str)
+            .unwrap();
+        let turn = request_io(
+            &mut reader,
+            &mut writer,
+            &mut next_id,
+            "turn/start",
+            json!({
+                "threadId": thread_id,
+                "input": [{ "type": "text", "text": "执行 AuraPilot 任务 TASK-001" }]
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(thread_id, "thr_new");
+        assert_eq!(
+            turn.pointer("/turn/id").and_then(Value::as_str),
+            Some("turn_new")
+        );
+        let messages = String::from_utf8(writer)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(messages[0]["method"], "thread/start");
+        assert_eq!(messages[0]["params"]["cwd"], "/repo with spaces");
+        assert_eq!(messages[1]["method"], "turn/start");
+        assert_eq!(messages[1]["params"]["threadId"], "thr_new");
+        assert_eq!(
+            messages[1]["params"]["input"][0]["text"],
+            "执行 AuraPilot 任务 TASK-001"
+        );
+    }
+
+    #[test]
+    fn adapter_contract_reports_malformed_responses_and_immediate_stream_exit() {
+        let mut malformed = Cursor::new(b"not-json\n");
+        let mut writer = Vec::new();
+        let mut next_id = 1;
+        let malformed_error = request_io(
+            &mut malformed,
+            &mut writer,
+            &mut next_id,
+            "thread/start",
+            json!({}),
+        )
+        .unwrap_err();
+        assert!(malformed_error.contains("invalid Codex App Server JSON"));
+
+        let mut closed = Cursor::new(Vec::<u8>::new());
+        let mut writer = Vec::new();
+        let mut next_id = 1;
+        let closed_error = request_io(
+            &mut closed,
+            &mut writer,
+            &mut next_id,
+            "thread/start",
+            json!({}),
+        )
+        .unwrap_err();
+        assert_eq!(
+            closed_error,
+            "Codex App Server closed its output unexpectedly"
+        );
     }
 
     #[test]

@@ -202,13 +202,13 @@ const controlLiveTurn = async (action: 'steer' | 'interrupt') => {
   <div class="modal-backdrop" @mousedown.self="$emit('close')">
     <section class="task-modal push-modal" role="dialog" aria-modal="true" aria-label="Push 任务">
       <header>
-        <div><span class="modal-mark"><UiIcon name="send"/></span><div><h2>Push {{ task.document.id }}</h2><p>选择打开新 CLI 或在后台静默执行</p></div></div>
+        <div><span class="modal-mark"><UiIcon name="send"/></span><div><h2>Push {{ task.document.id }}</h2><p>选择打开新 CLI 或由 AuraPilot 在后台执行</p></div></div>
         <button class="icon-button" aria-label="关闭" @click="$emit('close')"><UiIcon name="x"/></button>
       </header>
       <div class="modal-body">
         <div class="push-mode-switch" role="tablist" aria-label="Session 选择">
           <button :class="{ active: mode === 'new' }" role="tab" :aria-selected="mode === 'new'" @click="mode = 'new'">新 Session</button>
-          <button :class="{ active: mode === 'existing' }" role="tab" :aria-selected="mode === 'existing'" @click="mode = 'existing'">后台执行（静默） <b>{{ agents.sessions.length }}</b></button>
+          <button :class="{ active: mode === 'existing' }" role="tab" :aria-selected="mode === 'existing'" @click="mode = 'existing'">后台执行 <b>{{ agents.sessions.length }}</b></button>
         </div>
 
         <template v-if="mode === 'new'">
@@ -240,7 +240,7 @@ const controlLiveTurn = async (action: 'steer' | 'interrupt') => {
         </template>
 
         <template v-else>
-          <p class="push-notice"><strong>后台 Agent 会静默执行，当前 Agent CLI 不会显示执行过程。</strong>它会通过独立连接恢复所选 Session 的已保存上下文，通常会产生额外 Token 消耗。AuraPilot 无法保证会话上下文仍适合当前任务，请检查 Profile、项目和 Session ID；此模式不会切换 Git 分支。</p>
+          <p class="push-notice"><strong>后台 Agent 不会出现在当前 Agent CLI，但可在 AuraPilot“执行中心”查看 Provider 回传的过程。</strong>它会通过独立连接恢复所选 Session 的已保存上下文，通常会产生额外 Token 消耗。AuraPilot 无法保证会话上下文仍适合当前任务；不同 Provider 可回传的细节不同，请检查 Profile、项目和 Session ID。此模式不会切换 Git 分支。</p>
           <div v-if="agents.sessions.length" class="session-list">
             <button v-for="session in agents.sessions" :key="session.id" :class="['session-option', { selected: selectedSession === session.id }]" @click="selectedSession = session.id">
               <span :class="['session-state', session.state]"/>
@@ -287,7 +287,7 @@ const controlLiveTurn = async (action: 'steer' | 'interrupt') => {
             <b>{{ outcome.session.display_name || `${outcome.session.profile_id} Session` }}</b>
             <code :title="outcome.session.external_session_id">{{ shortId(outcome.session.external_session_id) }}</code>
           </div>
-          <small v-if="mode === 'existing' && outcome.session?.provider === 'codex'">这是由 AuraPilot 独立连接创建的后台 Turn，不会显示在当前 Codex CLI。请按上方 Thread ID 核对，并在 AuraPilot 中查看任务活动日志。</small>
+          <small v-if="mode === 'existing' && outcome.session?.provider === 'codex'">这是由 AuraPilot 独立连接创建的后台 Turn，不会显示在当前 Codex CLI。请按上方 Thread ID 核对，并在“执行中心”查看实时事件；任务活动日志仍由 Agent 写入任务文件。</small>
         </section>
         <p v-if="branchResult" :class="['push-result', branchResultSuccess ? 'success' : 'warning']" role="status">{{ branchResult }}</p>
         <p v-if="error || agents.error" class="form-error" role="alert" aria-live="assertive">{{ error || agents.error }}</p>

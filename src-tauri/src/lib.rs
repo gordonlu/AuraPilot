@@ -7,10 +7,10 @@ use commands::{
     add_project, bind_agent_session, create_task, delete_agent_profile, delete_task,
     export_aura_tasks, fork_task_session, get_git_workspace_status, import_aura_tasks,
     initialize_project, interrupt_task_session, list_agent_profiles, list_agent_sessions,
-    list_projects, list_push_attempts, open_project_folder, preview_aura_import,
-    preview_pointer_prompt, push_task, push_task_to_session, remove_project, save_agent_profile,
-    scan_project, scan_projects, steer_task_session, test_agent_profile, transition_task,
-    update_agent_session, update_task,
+    list_execution_events, list_projects, list_push_attempts, open_project_folder,
+    preview_aura_import, preview_pointer_prompt, push_task, push_task_to_session, remove_project,
+    save_agent_profile, scan_project, scan_projects, steer_task_session, test_agent_profile,
+    transition_task, update_agent_session, update_task,
 };
 use commands::{recover_claude_inboxes, recover_codex_inboxes, recover_opencode_inboxes};
 use state::AppState;
@@ -18,6 +18,7 @@ use tauri::{Emitter, Manager};
 
 pub const PROJECT_CHANGED_EVENT: &str = "aurapilot://project-changed";
 pub const PUSH_ATTEMPT_EVENT: &str = "aurapilot://push-attempt";
+pub const EXECUTION_EVENT: &str = "aurapilot://execution-event";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -74,6 +75,7 @@ pub fn run() {
             preview_pointer_prompt,
             push_task,
             list_push_attempts,
+            list_execution_events,
             list_agent_sessions,
             bind_agent_session,
             update_agent_session,

@@ -7,6 +7,7 @@ import type {
   AgentProvider,
   AgentProfileEntry,
   AgentSessionBinding,
+  ExecutionEvent,
   GitWorkspaceStatus,
   PointerPrompt,
   PushOutcome,
@@ -21,6 +22,7 @@ const demoProvider = (profileId: string): AgentProvider => {
 }
 
 export const PUSH_ATTEMPT_EVENT = 'aurapilot://push-attempt'
+export const EXECUTION_EVENT = 'aurapilot://execution-event'
 
 const builtin = (
   id: string,
@@ -66,21 +68,65 @@ export const useAgentsStore = defineStore('agents', {
     gitWorkspaces: {} as Record<string, GitWorkspaceStatus>,
     runtimeError: null as string | null,
     stopListening: null as UnlistenFn | null,
+    stopExecutionListening: null as UnlistenFn | null,
+    pushAttempts: [] as PushAttempt[],
+    executionEvents: [] as ExecutionEvent[],
+    executionLoading: false,
+    executionError: null as string | null,
   }),
   actions: {
     async startWatchingAttempts() {
       if (!isTauri() || this.stopListening) return
+      try {
+        this.pushAttempts = await invokeBackend<PushAttempt[]>('list_push_attempts')
+        this.executionEvents = await invokeBackend<ExecutionEvent[]>('list_execution_events', {
+          projectId: null, taskId: null, limit: 300,
+        })
+      } catch (error) {
+        this.executionError = `无法读取历史执行记录：${String(error)}`
+      }
       this.stopListening = await listen<PushAttempt>(PUSH_ATTEMPT_EVENT, ({ payload }) => {
+        const index = this.pushAttempts.findIndex((attempt) => attempt.id === payload.id)
+        if (index >= 0) this.pushAttempts[index] = payload
+        else this.pushAttempts.unshift(payload)
         if (!payload.error) return
         this.runtimeError = `${payload.task_id} · ${payload.agent_profile_id}：${payload.error}`
+      })
+      this.stopExecutionListening = await listen<ExecutionEvent>(EXECUTION_EVENT, ({ payload }) => {
+        if (this.executionEvents.some((event) => event.id === payload.id)) return
+        this.executionEvents.unshift(payload)
+        if (this.executionEvents.length > 300) this.executionEvents.length = 300
+        if (payload.level === 'error') {
+          this.runtimeError = `${payload.task_id} · ${payload.profile_id}：${payload.message}${payload.detail ? `；${payload.detail}` : ''}`
+        }
       })
     },
     stopWatchingAttempts() {
       this.stopListening?.()
+      this.stopExecutionListening?.()
       this.stopListening = null
+      this.stopExecutionListening = null
     },
     clearRuntimeError() {
       this.runtimeError = null
+    },
+    async loadExecutionEvents(projectId?: string, taskId?: string) {
+      if (!isTauri()) return this.executionEvents
+      this.executionLoading = true
+      this.executionError = null
+      try {
+        this.executionEvents = await invokeBackend<ExecutionEvent[]>('list_execution_events', {
+          projectId: projectId || null,
+          taskId: taskId || null,
+          limit: 300,
+        })
+        return this.executionEvents
+      } catch (error) {
+        this.executionError = String(error)
+        throw error
+      } finally {
+        this.executionLoading = false
+      }
     },
     async load() {
       this.loading = true

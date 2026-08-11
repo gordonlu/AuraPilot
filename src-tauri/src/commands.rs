@@ -2,7 +2,7 @@ use crate::providers::claude::ClaudeProcess;
 use crate::providers::codex::{CodexAppSession, CodexLiveHandle, StartedTurn};
 use crate::providers::opencode::{OpenCodeLiveHandle, OpenCodeServer};
 use crate::state::AppState;
-use crate::{PUSH_ATTEMPT_EVENT, platform};
+use crate::{EXECUTION_EVENT, PUSH_ATTEMPT_EVENT, platform};
 use aurapilot_core::agent_profile::{
     AgentLaunchProfile, LaunchMode, PromptTransport, is_builtin_profile,
 };
@@ -21,8 +21,9 @@ use aurapilot_core::project_scanner::{
 };
 use aurapilot_core::push_attempt::{PushAttempt, PushAttemptStatus, PushDelivery};
 use aurapilot_core::runtime_store::{
-    AgentProvider, NewPush, NewSessionBinding, PushDeliveryPolicy, PushMode, PushStatus,
-    SessionBinding, SessionBindingSource, SessionRuntimeState, SessionVerification,
+    AgentProvider, ExecutionEvent, NewExecutionEvent, NewPush, NewSessionBinding,
+    PushDeliveryPolicy, PushMode, PushStatus, SessionBinding, SessionBindingSource,
+    SessionRuntimeState, SessionVerification,
 };
 use aurapilot_core::session_route::{PushRoute, SessionCapabilities, route_push};
 use aurapilot_core::validation::SeverityProfile;
@@ -40,6 +41,192 @@ use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use uuid::Uuid;
 use zeroize::Zeroizing;
+
+#[derive(Clone)]
+struct ExecutionContext {
+    project_id: Uuid,
+    task_id: String,
+    profile_id: String,
+    provider: AgentProvider,
+    session_id: Option<Uuid>,
+    attempt_id: Option<Uuid>,
+}
+
+struct ExecutionEventNote<'a> {
+    kind: &'a str,
+    level: &'a str,
+    phase: &'a str,
+    message: &'a str,
+    detail: Option<&'a str>,
+}
+
+fn attempt_execution_context(
+    attempts: &std::sync::Arc<std::sync::Mutex<aurapilot_core::push_attempt::PushAttemptStore>>,
+    attempt_id: Option<Uuid>,
+    provider: AgentProvider,
+    session_id: Option<Uuid>,
+) -> Option<ExecutionContext> {
+    let attempt_id = attempt_id?;
+    let attempt = attempts
+        .lock()
+        .ok()?
+        .attempts()
+        .iter()
+        .find(|attempt| attempt.id == attempt_id)?
+        .clone();
+    Some(ExecutionContext {
+        project_id: attempt.project_id,
+        task_id: attempt.task_id,
+        profile_id: attempt.agent_profile_id,
+        provider,
+        session_id,
+        attempt_id: Some(attempt_id),
+    })
+}
+
+fn record_execution_event(
+    runtime: &std::sync::Arc<std::sync::Mutex<aurapilot_core::runtime_store::RuntimeStore>>,
+    app: &AppHandle,
+    context: &ExecutionContext,
+    note: ExecutionEventNote<'_>,
+) {
+    let result = runtime
+        .lock()
+        .map_err(|error| error.to_string())
+        .and_then(|mut store| {
+            store
+                .append_execution_event(NewExecutionEvent {
+                    project_id: context.project_id,
+                    task_id: &context.task_id,
+                    profile_id: &context.profile_id,
+                    provider: context.provider,
+                    session_binding_id: context.session_id,
+                    attempt_id: context.attempt_id,
+                    kind: note.kind,
+                    level: note.level,
+                    phase: note.phase,
+                    message: note.message,
+                    detail: note.detail,
+                })
+                .map_err(|error| error.to_string())
+        });
+    match result {
+        Ok(event) => emit_or_log(app, EXECUTION_EVENT, &event),
+        Err(error) => eprintln!("failed to persist execution event: {error}"),
+    }
+}
+
+fn codex_event_summary(event: &serde_json::Value) -> Option<(&'static str, &'static str, String)> {
+    let method = event.get("method").and_then(serde_json::Value::as_str)?;
+    if method.ends_with("/delta") || method.contains("tokenUsage") {
+        return None;
+    }
+    if method.contains("requestApproval") {
+        return Some((
+            "approval",
+            "warning",
+            "Agent 请求交互审批；AuraPilot 当前无法代替用户响应，该请求会被拒绝。".into(),
+        ));
+    }
+    let item = event.pointer("/params/item");
+    let item_type = item
+        .and_then(|value| value.get("type"))
+        .and_then(serde_json::Value::as_str);
+    let text = item
+        .and_then(|value| value.get("text"))
+        .and_then(serde_json::Value::as_str);
+    let command = item
+        .and_then(|value| value.get("command"))
+        .and_then(serde_json::Value::as_str);
+    let summary = match (method, item_type) {
+        ("turn/started", _) => ("lifecycle", "info", "Codex Turn 已开始".into()),
+        ("turn/completed", _) => ("lifecycle", "info", "Codex Turn 已完成".into()),
+        ("item/started", Some("commandExecution")) => (
+            "command",
+            "info",
+            format!("开始执行命令：{}", command.unwrap_or("未提供命令内容")),
+        ),
+        ("item/completed", Some("commandExecution")) => (
+            "command",
+            "info",
+            format!("命令执行结束：{}", command.unwrap_or("未提供命令内容")),
+        ),
+        ("item/started", Some("fileChange")) => {
+            ("file_change", "info", "Codex 开始处理文件变更".into())
+        }
+        ("item/completed", Some("fileChange")) => {
+            ("file_change", "info", "Codex 已完成一组文件变更".into())
+        }
+        ("item/completed", Some("agentMessage")) => (
+            "agent_message",
+            "info",
+            text.filter(|value| !value.trim().is_empty())
+                .unwrap_or("Codex 返回了一条消息")
+                .to_owned(),
+        ),
+        ("item/started", Some("reasoning")) => ("reasoning", "info", "Codex 正在分析任务".into()),
+        ("item/completed", Some(kind)) => ("provider", "info", format!("Codex 完成事件：{kind}")),
+        _ if method.starts_with("turn/") || method.starts_with("thread/") => {
+            ("lifecycle", "info", format!("Codex 事件：{method}"))
+        }
+        _ => return None,
+    };
+    Some(summary)
+}
+
+fn provider_event_detail(event: &serde_json::Value) -> Option<String> {
+    fn redact(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, value) in map {
+                    if matches!(key.as_str(), "input" | "prompt") {
+                        *value = serde_json::Value::String("[redacted by AuraPilot]".into());
+                    } else {
+                        redact(value);
+                    }
+                }
+            }
+            serde_json::Value::Array(values) => values.iter_mut().for_each(redact),
+            _ => {}
+        }
+    }
+    let mut detail = event.clone();
+    redact(&mut detail);
+    serde_json::to_string_pretty(&detail).ok()
+}
+
+fn opencode_matching_message<'a>(
+    messages: &'a serde_json::Value,
+    parent_message_id: &str,
+) -> Option<&'a serde_json::Value> {
+    messages.as_array()?.iter().rev().find(|message| {
+        message
+            .pointer("/info/role")
+            .and_then(serde_json::Value::as_str)
+            == Some("assistant")
+            && message
+                .pointer("/info/parentID")
+                .and_then(serde_json::Value::as_str)
+                == Some(parent_message_id)
+    })
+}
+
+fn opencode_message_summary(
+    messages: &serde_json::Value,
+    parent_message_id: &str,
+) -> Option<String> {
+    let message = opencode_matching_message(messages, parent_message_id)?;
+    let text = message
+        .get("parts")?
+        .as_array()?
+        .iter()
+        .filter(|part| part.get("type").and_then(serde_json::Value::as_str) == Some("text"))
+        .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
+        .filter(|text| !text.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
+}
 
 const CODEX_CAPABILITIES: SessionCapabilities = SessionCapabilities {
     resumable: true,
@@ -907,6 +1094,28 @@ pub async fn list_push_attempts(state: State<'_, AppState>) -> Result<Vec<PushAt
         .map_err(|error| error.to_string())?
         .attempts()
         .to_vec())
+}
+
+#[tauri::command]
+pub async fn list_execution_events(
+    project_id: Option<String>,
+    task_id: Option<String>,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<Vec<ExecutionEvent>, String> {
+    let project_id = project_id
+        .map(|value| Uuid::parse_str(&value).map_err(|error| error.to_string()))
+        .transpose()?;
+    let runtime = state.runtime.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        runtime
+            .lock()
+            .map_err(|error| error.to_string())?
+            .list_execution_events(project_id, task_id.as_deref(), limit.unwrap_or(300))
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -3665,8 +3874,76 @@ fn monitor_opencode_inbox(
     let mut attempt_id = initial_attempt_id;
     loop {
         let process_id = server.process_id();
+        let execution = attempt_execution_context(
+            &attempts,
+            attempt_id,
+            AgentProvider::OpenCode,
+            Some(session.id),
+        );
+        if let Some(context) = execution.as_ref() {
+            record_execution_event(
+                &runtime,
+                &app,
+                context,
+                ExecutionEventNote {
+                    kind: "lifecycle",
+                    level: "info",
+                    phase: "message_running",
+                    message: "OpenCode 已接收任务，后台 Session 正在运行",
+                    detail: Some(&format!("message_id={message_id}; process_id={process_id}")),
+                },
+            );
+        }
         let completed =
             server.wait_for_message_completion(&session.external_session_id, &message_id);
+        if let Some(context) = execution.as_ref() {
+            match completed.as_ref() {
+                Ok(()) => {
+                    if let Ok(messages) = server.session_messages(&session.external_session_id) {
+                        let detail = opencode_matching_message(&messages, &message_id)
+                            .and_then(provider_event_detail);
+                        if let Some(summary) = opencode_message_summary(&messages, &message_id) {
+                            record_execution_event(
+                                &runtime,
+                                &app,
+                                context,
+                                ExecutionEventNote {
+                                    kind: "agent_message",
+                                    level: "info",
+                                    phase: "message_result",
+                                    message: &summary,
+                                    detail: detail.as_deref(),
+                                },
+                            );
+                        }
+                    }
+                    record_execution_event(
+                        &runtime,
+                        &app,
+                        context,
+                        ExecutionEventNote {
+                            kind: "lifecycle",
+                            level: "success",
+                            phase: "message_completed",
+                            message: "OpenCode 本轮执行已结束；请检查任务文件、Git 变更和验证记录",
+                            detail: None,
+                        },
+                    )
+                }
+                Err(error) => record_execution_event(
+                    &runtime,
+                    &app,
+                    context,
+                    ExecutionEventNote {
+                        kind: "error",
+                        level: "error",
+                        phase: "message_failed",
+                        message: "OpenCode Session 监控异常中止",
+                        detail: Some(error),
+                    },
+                ),
+            }
+        }
         if let Some(id) = attempt_id
             && let Ok(mut store) = attempts.lock()
             && let Ok(exited) = store.update(
@@ -4062,7 +4339,89 @@ fn monitor_codex_inbox(
     let mut turn = initial_turn;
     let mut attempt_id = initial_attempt_id;
     loop {
-        let completed = codex.wait_for_turn(&turn.turn_id);
+        let execution = attempt_execution_context(
+            &attempts,
+            attempt_id,
+            AgentProvider::Codex,
+            Some(session_id),
+        );
+        if let Some(context) = execution.as_ref() {
+            record_execution_event(
+                &runtime,
+                &app,
+                context,
+                ExecutionEventNote {
+                    kind: "lifecycle",
+                    level: "info",
+                    phase: "turn_running",
+                    message: "Codex 已接收任务，后台 Turn 正在运行",
+                    detail: Some(&format!("turn_id={}", turn.turn_id)),
+                },
+            );
+        }
+        let completed = codex.wait_for_turn_observing(&turn.turn_id, |event| {
+            let Some(context) = execution.as_ref() else {
+                return;
+            };
+            let Some((kind, level, message)) = codex_event_summary(event) else {
+                return;
+            };
+            if kind == "approval"
+                && let Ok(mut store) = runtime.lock()
+                && let Err(error) = store.update_session_runtime(
+                    session_id,
+                    SessionRuntimeState::WaitingApproval,
+                    Some(&turn.turn_id),
+                )
+            {
+                eprintln!("failed to persist Codex approval boundary: {error}");
+            }
+            let detail = provider_event_detail(event);
+            let phase = event
+                .get("method")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("provider_event");
+            record_execution_event(
+                &runtime,
+                &app,
+                context,
+                ExecutionEventNote {
+                    kind,
+                    level,
+                    phase,
+                    message: &message,
+                    detail: detail.as_deref(),
+                },
+            );
+        });
+        if let Some(context) = execution.as_ref() {
+            match completed.as_ref() {
+                Ok(()) => record_execution_event(
+                    &runtime,
+                    &app,
+                    context,
+                    ExecutionEventNote {
+                        kind: "lifecycle",
+                        level: "success",
+                        phase: "turn_completed",
+                        message: "Codex Turn 已结束；请检查任务文件、Git 变更和验证记录",
+                        detail: None,
+                    },
+                ),
+                Err(error) => record_execution_event(
+                    &runtime,
+                    &app,
+                    context,
+                    ExecutionEventNote {
+                        kind: "error",
+                        level: "error",
+                        phase: "turn_failed",
+                        message: "Codex Turn 监控异常中止",
+                        detail: Some(error),
+                    },
+                ),
+            }
+        }
         if let Some(id) = attempt_id
             && let Ok(mut store) = attempts.lock()
             && let Ok(exited) = store.update(
@@ -4415,7 +4774,10 @@ fn latest_session(
 
 #[cfg(test)]
 mod tests {
-    use super::copy_text_with;
+    use super::{
+        codex_event_summary, copy_text_with, opencode_message_summary, provider_event_detail,
+    };
+    use serde_json::json;
     use std::cell::Cell;
     use std::io;
 
@@ -4439,5 +4801,69 @@ mod tests {
     fn external_provider_remains_a_fallback_for_native_failures() {
         copy_text_with(|| Err(io::Error::other("native unavailable")), || Ok(()))
             .expect("system provider should recover a native clipboard failure");
+    }
+
+    #[test]
+    fn codex_observability_surfaces_commands_messages_and_approval_boundaries() {
+        let command = json!({
+            "method": "item/started",
+            "params": { "item": { "type": "commandExecution", "command": "pnpm test" } }
+        });
+        assert_eq!(
+            codex_event_summary(&command),
+            Some(("command", "info", "开始执行命令：pnpm test".into()))
+        );
+        let message = json!({
+            "method": "item/completed",
+            "params": { "item": { "type": "agentMessage", "text": "验证完成" } }
+        });
+        assert_eq!(
+            codex_event_summary(&message),
+            Some(("agent_message", "info", "验证完成".into()))
+        );
+        let approval = json!({
+            "id": 7,
+            "method": "item/commandExecution/requestApproval",
+            "params": {}
+        });
+        let summary = codex_event_summary(&approval).unwrap();
+        assert_eq!(summary.0, "approval");
+        assert_eq!(summary.1, "warning");
+        assert!(summary.2.contains("无法代替用户响应"));
+        assert_eq!(
+            codex_event_summary(&json!({ "method": "item/agentMessage/delta" })),
+            None
+        );
+    }
+
+    #[test]
+    fn opencode_observability_extracts_the_matching_assistant_result() {
+        let messages = json!([{
+            "info": { "role": "assistant", "parentID": "other" },
+            "parts": [{ "type": "text", "text": "wrong result" }]
+        }, {
+            "info": { "role": "assistant", "parentID": "push-1" },
+            "parts": [
+                { "type": "tool", "name": "bash" },
+                { "type": "text", "text": "任务已完成，测试通过。" }
+            ]
+        }]);
+        assert_eq!(
+            opencode_message_summary(&messages, "push-1").as_deref(),
+            Some("任务已完成，测试通过。")
+        );
+        assert_eq!(opencode_message_summary(&messages, "missing"), None);
+    }
+
+    #[test]
+    fn provider_details_redact_prompts_before_local_persistence() {
+        let detail = provider_event_detail(&json!({
+            "method": "turn/started",
+            "params": { "input": [{ "type": "text", "text": "secret prompt" }], "result": "kept" }
+        }))
+        .unwrap();
+        assert!(!detail.contains("secret prompt"));
+        assert!(detail.contains("redacted by AuraPilot"));
+        assert!(detail.contains("kept"));
     }
 }
