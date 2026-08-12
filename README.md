@@ -103,6 +103,24 @@ pnpm build
 cargo test -p aurapilot-core
 ```
 
+Real Provider smoke tests are explicit, local-only Beta checks. They are not
+part of ordinary CI and do not send a task or Pointer Prompt. Each run writes a
+structured JSON report with its evidence level and the detected Provider
+version:
+
+```sh
+# Reads an existing Codex Thread without starting a Turn.
+AURAPILOT_CODEX_THREAD_ID=<thread-id> pnpm test:providers -- \
+  --provider codex --confirm-real-provider
+
+# Starts OpenCode Server and validates empty Session lifecycle operations.
+pnpm test:providers -- --provider opencode --confirm-real-provider
+```
+
+The report defaults to `target/aurapilot/provider-compatibility.json`. A passing
+smoke test proves only the tested Provider boundary on the recorded local
+version; it does not prove that an Agent can complete an AuraPilot task.
+
 `pnpm dev` opens the browser-only frontend with an empty project list because it cannot access the desktop filesystem. Append `?demo=1` to the local URL only when intentionally previewing the built-in demo projects. Use `pnpm tauri dev` for real local projects.
 
 The Bootstrap document is validated only in an isolated repository during Phase 5. It must not be executed against this repository during normal development.
