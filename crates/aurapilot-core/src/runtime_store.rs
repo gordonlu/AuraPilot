@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -218,6 +218,95 @@ pub enum PushStatus {
     Cancelled,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalKind {
+    CommandExecution,
+    FileChange,
+}
+
+impl ApprovalKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::CommandExecution => "command_execution",
+            Self::FileChange => "file_change",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, RuntimeStoreError> {
+        match value {
+            "command_execution" => Ok(Self::CommandExecution),
+            "file_change" => Ok(Self::FileChange),
+            _ => Err(RuntimeStoreError::InvalidEnum(
+                "approval_kind",
+                value.into(),
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalStatus {
+    Pending,
+    Submitting,
+    Approved,
+    Declined,
+    Expired,
+    Failed,
+}
+
+impl ApprovalStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Submitting => "submitting",
+            Self::Approved => "approved",
+            Self::Declined => "declined",
+            Self::Expired => "expired",
+            Self::Failed => "failed",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, RuntimeStoreError> {
+        match value {
+            "pending" => Ok(Self::Pending),
+            "submitting" => Ok(Self::Submitting),
+            "approved" => Ok(Self::Approved),
+            "declined" => Ok(Self::Declined),
+            "expired" => Ok(Self::Expired),
+            "failed" => Ok(Self::Failed),
+            _ => Err(RuntimeStoreError::InvalidEnum(
+                "approval_status",
+                value.into(),
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalDecision {
+    Accept,
+    Decline,
+}
+
+impl ApprovalDecision {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Accept => "accept",
+            Self::Decline => "decline",
+        }
+    }
+
+    fn status(self) -> ApprovalStatus {
+        match self {
+            Self::Accept => ApprovalStatus::Approved,
+            Self::Decline => ApprovalStatus::Declined,
+        }
+    }
+}
+
 impl PushStatus {
     fn as_str(self) -> &'static str {
         match self {
@@ -355,6 +444,49 @@ pub struct NewPush<'a> {
     pub idempotency_key: &'a str,
 }
 
+/// A persisted, sanitized user-decision checkpoint. Raw provider params,
+/// prompts, environment variables, and credentials never enter this record.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ApprovalRecord {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub task_id: Option<String>,
+    pub profile_id: String,
+    pub provider: AgentProvider,
+    pub session_binding_id: Uuid,
+    pub attempt_id: Option<Uuid>,
+    pub turn_id: String,
+    pub item_id: String,
+    pub provider_request_key: String,
+    pub kind: ApprovalKind,
+    pub command: Option<String>,
+    pub cwd: Option<String>,
+    pub reason: Option<String>,
+    pub status: ApprovalStatus,
+    pub decision: Option<String>,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub resolved_at: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct NewApprovalRequest<'a> {
+    pub project_id: Uuid,
+    pub task_id: Option<&'a str>,
+    pub profile_id: &'a str,
+    pub provider: AgentProvider,
+    pub session_binding_id: Uuid,
+    pub attempt_id: Option<Uuid>,
+    pub turn_id: &'a str,
+    pub item_id: &'a str,
+    pub provider_request_key: &'a str,
+    pub kind: ApprovalKind,
+    pub command: Option<&'a str>,
+    pub cwd: Option<&'a str>,
+    pub reason: Option<&'a str>,
+}
+
 #[derive(Debug, Error)]
 pub enum RuntimeStoreError {
     #[error("runtime database path has no parent: {0}")]
@@ -375,6 +507,14 @@ pub enum RuntimeStoreError {
     ProfileRequired,
     #[error("push is not queued and cannot begin delivery: {0}")]
     PushNotQueued(Uuid),
+    #[error("approval request not found: {0}")]
+    ApprovalNotFound(Uuid),
+    #[error("approval request {id} is {actual}, expected {expected}")]
+    ApprovalStateConflict {
+        id: Uuid,
+        expected: &'static str,
+        actual: String,
+    },
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
     #[error(transparent)]
@@ -388,6 +528,8 @@ pub struct RuntimeStore {
     execution_event_retention: usize,
     execution_event_message_max_bytes: usize,
     execution_event_detail_max_bytes: usize,
+    approval_retention: usize,
+    approval_summary_max_bytes: usize,
 }
 
 impl RuntimeStore {
@@ -407,6 +549,8 @@ impl RuntimeStore {
             execution_event_retention: config.execution_event_retention,
             execution_event_message_max_bytes: config.execution_event_message_max_bytes,
             execution_event_detail_max_bytes: config.execution_event_detail_max_bytes,
+            approval_retention: config.approval_retention,
+            approval_summary_max_bytes: config.approval_summary_max_bytes,
         };
         store.migrate()?;
         Ok(store)
@@ -441,6 +585,13 @@ impl RuntimeStore {
         }
         if current < 3 {
             tx.execute_batch(include_str!("../migrations/0003_execution_events.sql"))?;
+            tx.execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?1, ?2)",
+                params![3, now()],
+            )?;
+        }
+        if current < 4 {
+            tx.execute_batch(include_str!("../migrations/0004_approval_requests.sql"))?;
             tx.execute(
                 "INSERT INTO schema_migrations(version, applied_at) VALUES (?1, ?2)",
                 params![SCHEMA_VERSION, now()],
@@ -1036,6 +1187,227 @@ impl RuntimeStore {
         let rows = statement.query_map(params![project, task_id, limit], map_execution_event)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
+
+    pub fn create_approval_request(
+        &mut self,
+        input: NewApprovalRequest<'_>,
+    ) -> Result<ApprovalRecord, RuntimeStoreError> {
+        let limit = self.approval_summary_max_bytes;
+        let record = ApprovalRecord {
+            id: Uuid::new_v4(),
+            project_id: input.project_id,
+            task_id: input.task_id.map(str::to_owned),
+            profile_id: input.profile_id.to_owned(),
+            provider: input.provider,
+            session_binding_id: input.session_binding_id,
+            attempt_id: input.attempt_id,
+            turn_id: input.turn_id.to_owned(),
+            item_id: input.item_id.to_owned(),
+            provider_request_key: truncate_utf8(input.provider_request_key, limit),
+            kind: input.kind,
+            command: input.command.map(|value| truncate_utf8(value, limit)),
+            cwd: input.cwd.map(|value| truncate_utf8(value, limit)),
+            reason: input.reason.map(|value| truncate_utf8(value, limit)),
+            status: ApprovalStatus::Pending,
+            decision: None,
+            error: None,
+            created_at: now(),
+            updated_at: now(),
+            resolved_at: None,
+        };
+        let tx = self.connection.transaction()?;
+        tx.execute(
+            "INSERT INTO approval_requests (
+                id, project_id, task_id, profile_id, provider, session_binding_id, attempt_id,
+                turn_id, item_id, provider_request_key, kind, command, cwd, reason, status,
+                decision, error, created_at, updated_at, resolved_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                'pending', NULL, NULL, ?15, ?15, NULL)",
+            params![
+                record.id.to_string(),
+                record.project_id.to_string(),
+                record.task_id,
+                record.profile_id,
+                record.provider.as_str(),
+                record.session_binding_id.to_string(),
+                record.attempt_id.map(|value| value.to_string()),
+                record.turn_id,
+                record.item_id,
+                record.provider_request_key,
+                record.kind.as_str(),
+                record.command,
+                record.cwd,
+                record.reason,
+                record.created_at,
+            ],
+        )?;
+        tx.execute(
+            "DELETE FROM approval_requests WHERE id NOT IN (
+                SELECT id FROM approval_requests ORDER BY created_at DESC, rowid DESC LIMIT ?1
+             ) AND status NOT IN ('pending', 'submitting')",
+            [self.approval_retention as i64],
+        )?;
+        tx.commit()?;
+        Ok(record)
+    }
+
+    pub fn approval_request(&self, id: Uuid) -> Result<Option<ApprovalRecord>, RuntimeStoreError> {
+        self.connection
+            .query_row(
+                "SELECT id, project_id, task_id, profile_id, provider, session_binding_id,
+                    attempt_id, turn_id, item_id, provider_request_key, kind, command, cwd,
+                    reason, status, decision, error, created_at, updated_at, resolved_at
+             FROM approval_requests WHERE id = ?1",
+                [id.to_string()],
+                map_approval_request,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn list_approval_requests(
+        &self,
+        project_id: Option<Uuid>,
+        limit: usize,
+    ) -> Result<Vec<ApprovalRecord>, RuntimeStoreError> {
+        let project = project_id.map(|value| value.to_string());
+        let limit = limit.min(self.approval_retention).max(1) as i64;
+        let mut statement = self.connection.prepare(
+            "SELECT id, project_id, task_id, profile_id, provider, session_binding_id,
+                    attempt_id, turn_id, item_id, provider_request_key, kind, command, cwd,
+                    reason, status, decision, error, created_at, updated_at, resolved_at
+             FROM approval_requests WHERE (?1 IS NULL OR project_id = ?1)
+             ORDER BY created_at DESC, rowid DESC LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![project, limit], map_approval_request)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Compare-and-swap claim: only one concurrent user action can answer an
+    /// approval on the live provider connection.
+    pub fn claim_approval_request(
+        &mut self,
+        id: Uuid,
+    ) -> Result<ApprovalRecord, RuntimeStoreError> {
+        let changed = self.connection.execute(
+            "UPDATE approval_requests SET status = 'submitting', updated_at = ?2
+             WHERE id = ?1 AND status = 'pending'",
+            params![id.to_string(), now()],
+        )?;
+        if changed == 0 {
+            return Err(match self.approval_request(id)? {
+                Some(record) => RuntimeStoreError::ApprovalStateConflict {
+                    id,
+                    expected: "pending",
+                    actual: record.status.as_str().to_owned(),
+                },
+                None => RuntimeStoreError::ApprovalNotFound(id),
+            });
+        }
+        self.approval_request(id)?
+            .ok_or(RuntimeStoreError::ApprovalNotFound(id))
+    }
+
+    pub fn complete_approval_request(
+        &mut self,
+        id: Uuid,
+        decision: ApprovalDecision,
+    ) -> Result<ApprovalRecord, RuntimeStoreError> {
+        let timestamp = now();
+        let changed = self.connection.execute(
+            "UPDATE approval_requests SET status = ?2, decision = ?3, error = NULL,
+                resolved_at = ?4, updated_at = ?4 WHERE id = ?1 AND status = 'submitting'",
+            params![
+                id.to_string(),
+                decision.status().as_str(),
+                decision.as_str(),
+                timestamp
+            ],
+        )?;
+        if changed == 0 {
+            return Err(match self.approval_request(id)? {
+                Some(record) => RuntimeStoreError::ApprovalStateConflict {
+                    id,
+                    expected: "submitting",
+                    actual: record.status.as_str().to_owned(),
+                },
+                None => RuntimeStoreError::ApprovalNotFound(id),
+            });
+        }
+        self.approval_request(id)?
+            .ok_or(RuntimeStoreError::ApprovalNotFound(id))
+    }
+
+    pub fn fail_approval_request(
+        &mut self,
+        id: Uuid,
+        status: ApprovalStatus,
+        error: &str,
+    ) -> Result<ApprovalRecord, RuntimeStoreError> {
+        if !matches!(status, ApprovalStatus::Expired | ApprovalStatus::Failed) {
+            return Err(RuntimeStoreError::InvalidEnum(
+                "approval_terminal",
+                status.as_str().into(),
+            ));
+        }
+        let timestamp = now();
+        self.connection.execute(
+            "UPDATE approval_requests SET status = ?2, error = ?3, resolved_at = ?4,
+                updated_at = ?4 WHERE id = ?1 AND status IN ('pending', 'submitting')",
+            params![id.to_string(), status.as_str(), error, timestamp],
+        )?;
+        self.approval_request(id)?
+            .ok_or(RuntimeStoreError::ApprovalNotFound(id))
+    }
+
+    pub fn expire_session_approvals(
+        &mut self,
+        session_id: Uuid,
+        turn_id: Option<&str>,
+        reason: &str,
+    ) -> Result<Vec<ApprovalRecord>, RuntimeStoreError> {
+        let ids = {
+            let mut statement = self.connection.prepare(
+                "SELECT id FROM approval_requests WHERE session_binding_id = ?1
+                 AND status IN ('pending', 'submitting') AND (?2 IS NULL OR turn_id = ?2)",
+            )?;
+            statement
+                .query_map(params![session_id.to_string(), turn_id], |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let mut records = Vec::with_capacity(ids.len());
+        for value in ids {
+            records.push(self.fail_approval_request(
+                Uuid::parse_str(&value)?,
+                ApprovalStatus::Expired,
+                reason,
+            )?);
+        }
+        Ok(records)
+    }
+
+    pub fn pending_approvals_for_session(
+        &self,
+        session_id: Uuid,
+    ) -> Result<usize, RuntimeStoreError> {
+        Ok(self.connection.query_row(
+            "SELECT COUNT(*) FROM approval_requests WHERE session_binding_id = ?1
+             AND status IN ('pending', 'submitting')",
+            [session_id.to_string()],
+            |row| row.get::<_, i64>(0),
+        )? as usize)
+    }
+
+    pub fn recover_pending_approvals(&mut self) -> Result<usize, RuntimeStoreError> {
+        Ok(self.connection.execute(
+            "UPDATE approval_requests SET status = 'expired',
+                error = 'AuraPilot 重启前该审批仍未处理，Provider 连接已断开，无法再响应',
+                resolved_at = ?1, updated_at = ?1 WHERE status IN ('pending', 'submitting')",
+            [now()],
+        )?)
+    }
 }
 
 fn truncate_utf8(value: &str, max_bytes: usize) -> String {
@@ -1292,6 +1664,64 @@ fn map_execution_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<ExecutionEve
         message: row.get(10)?,
         detail: row.get(11)?,
         created_at: row.get(12)?,
+    })
+}
+
+fn map_approval_request(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApprovalRecord> {
+    let parse_uuid = |index: usize, value: String| {
+        Uuid::parse_str(&value).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                index,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })
+    };
+    let parse_optional_uuid = |index: usize, value: Option<String>| {
+        value.map(|value| parse_uuid(index, value)).transpose()
+    };
+    let provider: String = row.get(4)?;
+    let kind: String = row.get(10)?;
+    let status: String = row.get(14)?;
+    Ok(ApprovalRecord {
+        id: parse_uuid(0, row.get(0)?)?,
+        project_id: parse_uuid(1, row.get(1)?)?,
+        task_id: row.get(2)?,
+        profile_id: row.get(3)?,
+        provider: AgentProvider::parse(&provider).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                4,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
+        session_binding_id: parse_uuid(5, row.get(5)?)?,
+        attempt_id: parse_optional_uuid(6, row.get(6)?)?,
+        turn_id: row.get(7)?,
+        item_id: row.get(8)?,
+        provider_request_key: row.get(9)?,
+        kind: ApprovalKind::parse(&kind).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                10,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
+        command: row.get(11)?,
+        cwd: row.get(12)?,
+        reason: row.get(13)?,
+        status: ApprovalStatus::parse(&status).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                14,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
+        decision: row.get(15)?,
+        error: row.get(16)?,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
+        resolved_at: row.get(19)?,
     })
 }
 
@@ -1653,6 +2083,57 @@ mod tests {
                 .unwrap()
                 .id,
             first.id
+        );
+    }
+
+    #[test]
+    fn approval_is_truncated_claimed_once_and_expired_after_restart() {
+        let mut store = store();
+        let project = Uuid::new_v4();
+        let session = store
+            .register_session(NewSessionBinding {
+                project_id: project,
+                profile_id: "codex",
+                provider: AgentProvider::Codex,
+                external_session_id: "thr_approval",
+                source: SessionBindingSource::Managed,
+                verification: SessionVerification::Verified,
+                display_name: None,
+                working_directory: Path::new("/repo"),
+                state: SessionRuntimeState::Running,
+            })
+            .unwrap();
+        let long = "a".repeat(CoreConfig::default().approval_summary_max_bytes + 50);
+        let record = store
+            .create_approval_request(NewApprovalRequest {
+                project_id: project,
+                task_id: Some("TASK-001"),
+                profile_id: "codex",
+                provider: AgentProvider::Codex,
+                session_binding_id: session.id,
+                attempt_id: None,
+                turn_id: "turn_1",
+                item_id: "item_1",
+                provider_request_key: "91",
+                kind: ApprovalKind::CommandExecution,
+                command: Some(&long),
+                cwd: Some("/repo"),
+                reason: None,
+            })
+            .unwrap();
+        assert!(
+            record.command.as_ref().unwrap().len()
+                <= CoreConfig::default().approval_summary_max_bytes + 3
+        );
+        store.claim_approval_request(record.id).unwrap();
+        assert!(matches!(
+            store.claim_approval_request(record.id),
+            Err(RuntimeStoreError::ApprovalStateConflict { .. })
+        ));
+        assert_eq!(store.recover_pending_approvals().unwrap(), 1);
+        assert_eq!(
+            store.approval_request(record.id).unwrap().unwrap().status,
+            ApprovalStatus::Expired
         );
     }
 

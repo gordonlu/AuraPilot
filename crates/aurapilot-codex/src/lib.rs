@@ -204,6 +204,111 @@ pub struct StartedTurn {
     pub process_id: Option<u32>,
 }
 
+/// Interactive approval requests that AuraPilot can safely route to a user.
+/// Full provider params remain inside this adapter; callers receive only the
+/// fields needed to identify the live request and present a decision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CodexApprovalKind {
+    CommandExecution,
+    FileChange,
+}
+
+impl CodexApprovalKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CommandExecution => "command_execution",
+            Self::FileChange => "file_change",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CodexApprovalRequest {
+    pub request_id: Value,
+    pub kind: CodexApprovalKind,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub item_id: String,
+    pub command: Option<String>,
+    pub cwd: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CodexApprovalDecision {
+    Accept,
+    Decline,
+}
+
+impl CodexApprovalDecision {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Accept => "accept",
+            Self::Decline => "decline",
+        }
+    }
+}
+
+const COMMAND_EXECUTION_APPROVAL_METHOD: &str = "item/commandExecution/requestApproval";
+const FILE_CHANGE_APPROVAL_METHOD: &str = "item/fileChange/requestApproval";
+
+/// Returns `None` for unsupported request methods and an explicit error for a
+/// supported method whose payload is incomplete. Callers must explicitly
+/// decline both cases instead of leaving the App Server waiting.
+pub fn parse_approval_request(message: &Value) -> Option<Result<CodexApprovalRequest, String>> {
+    let request_id = message.get("id")?.clone();
+    let method = message.get("method").and_then(Value::as_str)?;
+    let kind = match method {
+        COMMAND_EXECUTION_APPROVAL_METHOD => CodexApprovalKind::CommandExecution,
+        FILE_CHANGE_APPROVAL_METHOD => CodexApprovalKind::FileChange,
+        _ => return None,
+    };
+    let params = message.get("params").cloned().unwrap_or(Value::Null);
+    let required = |field: &str| {
+        params
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| format!("Codex approval request {method} is missing params.{field}"))
+    };
+    let optional_text = |field: &str| {
+        params
+            .get(field)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .filter(|value| !value.trim().is_empty())
+    };
+    let command = match params.get("command") {
+        Some(Value::String(command)) => Some(command.clone()),
+        Some(Value::Array(parts)) => {
+            let rendered = parts
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!rendered.trim().is_empty()).then_some(rendered)
+        }
+        _ => None,
+    };
+    Some((|| {
+        Ok(CodexApprovalRequest {
+            request_id,
+            kind,
+            thread_id: required("threadId")?,
+            turn_id: required("turnId")?,
+            item_id: required("itemId")?,
+            command,
+            cwd: optional_text("cwd"),
+            reason: optional_text("reason"),
+        })
+    })())
+}
+
+fn is_user_routable_approval(message: &Value) -> bool {
+    parse_approval_request(message).is_some()
+}
+
 trait CodexMessageSink: Send {
     fn send(&mut self, message: &Value) -> Result<(), String>;
 }
@@ -445,6 +550,23 @@ impl CodexLiveHandle {
         )?;
         Ok(())
     }
+
+    /// Answers an approval on this exact live connection. The request id is
+    /// echoed verbatim so Codex can correlate the response.
+    pub fn respond_approval(
+        &self,
+        request_id: &Value,
+        decision: CodexApprovalDecision,
+    ) -> Result<(), String> {
+        self.client.write(&json!({
+            "id": request_id,
+            "result": { "decision": decision.as_str() },
+        }))
+    }
+
+    pub fn decline_unanswerable_request(&self, request_id: &Value) -> Result<(), String> {
+        self.respond_approval(request_id, CodexApprovalDecision::Decline)
+    }
 }
 
 impl CodexClient {
@@ -494,6 +616,11 @@ impl CodexClient {
 
     fn resolve(&self, message: &Value) -> Result<bool, String> {
         if message.get("id").is_some() && message.get("method").is_some() {
+            if is_user_routable_approval(message) {
+                // Keep the request open. The event stream exposes it to the
+                // desktop layer, which answers later on this same connection.
+                return Ok(true);
+            }
             let mut sink = self
                 .sink
                 .lock()
@@ -972,6 +1099,78 @@ mod tests {
             messages
                 .iter()
                 .all(|message| message["params"]["threadId"] == "thr_live")
+        );
+    }
+
+    #[test]
+    fn approval_requests_are_parsed_and_left_for_user_decision() {
+        let message = json!({
+            "id": 91,
+            "method": "item/commandExecution/requestApproval",
+            "params": {
+                "threadId": "thr_1",
+                "turnId": "turn_1",
+                "itemId": "item_1",
+                "command": ["pnpm", "test"],
+                "cwd": "/repo",
+                "reason": "需要执行测试"
+            }
+        });
+        let parsed = parse_approval_request(&message).unwrap().unwrap();
+        assert_eq!(parsed.kind, CodexApprovalKind::CommandExecution);
+        assert_eq!(parsed.request_id, json!(91));
+        assert_eq!(parsed.thread_id, "thr_1");
+        assert_eq!(parsed.turn_id, "turn_1");
+        assert_eq!(parsed.item_id, "item_1");
+        assert_eq!(parsed.command.as_deref(), Some("pnpm test"));
+
+        let (client, output) = mock_client();
+        assert!(client.resolve(&message).unwrap());
+        assert!(output.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn malformed_and_unsupported_approvals_are_not_parked() {
+        let malformed = parse_approval_request(&json!({
+            "id": 4,
+            "method": "item/fileChange/requestApproval",
+            "params": { "threadId": "thr_1", "itemId": "item_1" }
+        }))
+        .unwrap();
+        assert!(malformed.unwrap_err().contains("params.turnId"));
+        assert!(
+            parse_approval_request(&json!({
+                "id": 5,
+                "method": "item/permissions/requestApproval",
+                "params": {}
+            }))
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn live_handle_answers_approval_on_the_same_connection() {
+        let (client, output) = mock_client();
+        let handle = CodexLiveHandle {
+            client,
+            thread_id: "thr_live".into(),
+        };
+        handle
+            .respond_approval(&json!(51), CodexApprovalDecision::Accept)
+            .unwrap();
+        handle.decline_unanswerable_request(&json!(52)).unwrap();
+
+        let messages = String::from_utf8(output.lock().unwrap().clone())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            messages,
+            vec![
+                json!({ "id": 51, "result": { "decision": "accept" } }),
+                json!({ "id": 52, "result": { "decision": "decline" } }),
+            ]
         );
     }
 

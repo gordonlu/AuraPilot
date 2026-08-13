@@ -21,6 +21,8 @@ pub struct CoreConfig {
     pub execution_event_retention: usize,
     pub execution_event_message_max_bytes: usize,
     pub execution_event_detail_max_bytes: usize,
+    pub approval_retention: usize,
+    pub approval_summary_max_bytes: usize,
     pub max_profile_args: usize,
     pub max_profile_value_bytes: usize,
     pub max_profile_id_bytes: usize,
@@ -60,6 +62,8 @@ impl Default for CoreConfig {
             execution_event_retention: 2_000,
             execution_event_message_max_bytes: 2_048,
             execution_event_detail_max_bytes: 16_384,
+            approval_retention: 500,
+            approval_summary_max_bytes: 2_048,
             max_profile_args: 64,
             max_profile_value_bytes: 16_384,
             max_profile_id_bytes: 64,
@@ -103,6 +107,8 @@ mod tests {
         assert_eq!(config.execution_event_retention, 2_000);
         assert_eq!(config.execution_event_message_max_bytes, 2_048);
         assert_eq!(config.execution_event_detail_max_bytes, 16_384);
+        assert_eq!(config.approval_retention, 500);
+        assert_eq!(config.approval_summary_max_bytes, 2_048);
         assert_eq!(config.max_profile_args, 64);
         assert_eq!(config.max_profile_value_bytes, 16_384);
         assert_eq!(config.max_profile_id_bytes, 64);

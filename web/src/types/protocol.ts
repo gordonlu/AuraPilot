@@ -197,6 +197,33 @@ export interface ExecutionEvent {
   created_at: string
 }
 
+export type ApprovalKind = 'command_execution' | 'file_change'
+export type ApprovalStatus = 'pending' | 'submitting' | 'approved' | 'declined' | 'expired' | 'failed'
+export type ApprovalDecision = 'accept' | 'decline'
+
+export interface ApprovalRequest {
+  id: string
+  project_id: string
+  task_id: string | null
+  profile_id: string
+  provider: AgentProvider
+  session_binding_id: string
+  attempt_id: string | null
+  turn_id: string
+  item_id: string
+  provider_request_key: string
+  kind: ApprovalKind
+  command: string | null
+  cwd: string | null
+  reason: string | null
+  status: ApprovalStatus
+  decision: ApprovalDecision | null
+  error: string | null
+  created_at: string
+  updated_at: string
+  resolved_at: string | null
+}
+
 export interface GitWorkspaceStatus {
   is_repository: boolean
   current_branch: string | null

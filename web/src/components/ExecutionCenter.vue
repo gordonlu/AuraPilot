@@ -45,11 +45,23 @@ const visibleAttempts = computed(() => agents.pushAttempts.filter((attempt) => {
   return !search || [attempt.task_id, attempt.agent_profile_id, attempt.error, projectName(attempt.project_id)]
     .some((value) => value?.toLowerCase().includes(search))
 }))
+const visibleApprovals = computed(() => agents.approvals.filter((approval) => {
+  if (projectFilter.value !== 'all' && approval.project_id !== projectFilter.value) return false
+  if (view.value === 'active') return ['pending', 'submitting'].includes(approval.status)
+  if (view.value === 'issues') return ['pending', 'failed'].includes(approval.status)
+  const search = query.value.trim().toLowerCase()
+  return !search || [approval.task_id, approval.command, approval.cwd, approval.reason, projectName(approval.project_id)]
+    .some((value) => value?.toLowerCase().includes(search))
+}))
 const activeCount = computed(() => agents.pushAttempts.filter((attempt) => ['requested', 'started'].includes(attempt.status)).length)
 const issueCount = computed(() => agents.pushAttempts.filter((attempt) => ['failed_to_start', 'status_unknown'].includes(attempt.status) || attempt.error).length
-  + agents.executionEvents.filter((event) => ['warning', 'error'].includes(event.level)).length)
+  + agents.executionEvents.filter((event) => event.kind !== 'approval' && ['warning', 'error'].includes(event.level)).length
+  + agents.approvals.filter((approval) => ['pending', 'failed'].includes(approval.status)).length)
 
-const refresh = () => agents.loadExecutionEvents(projectFilter.value === 'all' ? undefined : projectFilter.value)
+const refresh = () => Promise.all([
+  agents.loadExecutionEvents(projectFilter.value === 'all' ? undefined : projectFilter.value),
+  agents.loadApprovals(projectFilter.value === 'all' ? undefined : projectFilter.value),
+])
 const canOpenTask = (projectId: string, taskId: string) => props.snapshots
   .find((snapshot) => snapshot.registration.id === projectId)?.tasks
   .some((task) => task.document.id === taskId)
@@ -75,7 +87,7 @@ onMounted(() => refresh().catch(() => undefined))
       </div>
 
       <nav class="execution-tabs" aria-label="执行记录筛选">
-        <button :class="{ active: view === 'all' }" @click="view = 'all'">全部 <b>{{ visibleEvents.length + visibleAttempts.length }}</b></button>
+        <button :class="{ active: view === 'all' }" @click="view = 'all'">全部 <b>{{ visibleEvents.length + visibleAttempts.length + visibleApprovals.length }}</b></button>
         <button :class="{ active: view === 'active' }" @click="view = 'active'">进行中 <b>{{ activeCount }}</b></button>
         <button :class="{ active: view === 'issues' }" @click="view = 'issues'">需要处理 <b :class="{ danger: issueCount > 0 }">{{ issueCount }}</b></button>
       </nav>
@@ -83,6 +95,22 @@ onMounted(() => refresh().catch(() => undefined))
 
       <div class="execution-content">
         <div v-if="agents.executionError" class="execution-error" role="alert"><UiIcon name="alert" :size="15"/><span>{{ agents.executionError }}</span><button @click="refresh">重试</button></div>
+        <div v-if="agents.approvalError" class="execution-error" role="alert"><UiIcon name="alert" :size="15"/><span>{{ agents.approvalError }}</span><button @click="refresh">刷新状态</button></div>
+        <section v-if="visibleApprovals.length" class="approval-panel" aria-label="Codex 审批请求">
+          <div class="execution-section-title"><strong>Codex 审批请求</strong><span>决定会发回原 Session 连接</span></div>
+          <article v-for="approval in visibleApprovals" :key="approval.id" :class="['approval-card', approval.status]">
+            <header><strong>{{ approval.kind === 'command_execution' ? '命令执行' : '文件变更' }}</strong><b>{{ approval.status === 'pending' ? '等待处理' : approval.status === 'submitting' ? '正在提交' : approval.status === 'approved' ? '已批准' : approval.status === 'declined' ? '已拒绝' : approval.status === 'expired' ? '已失效' : '处理失败' }}</b></header>
+            <p>{{ approval.command || 'Codex 请求应用文件变更' }}</p>
+            <small>{{ projectName(approval.project_id) }} · {{ approval.task_id || '未关联任务' }} · {{ profileLabel(approval.profile_id) }}</small>
+            <small v-if="approval.cwd">目录：{{ approval.cwd }}</small>
+            <small v-if="approval.reason">原因：{{ approval.reason }}</small>
+            <p v-if="approval.error" class="approval-error">{{ approval.error }}</p>
+            <div v-if="approval.status === 'pending'" class="approval-actions">
+              <button class="button secondary" @click="agents.respondApproval(approval.id, 'decline').catch(() => undefined)">拒绝</button>
+              <button class="button primary" @click="agents.respondApproval(approval.id, 'accept').catch(() => undefined)">批准并继续</button>
+            </div>
+          </article>
+        </section>
         <div class="execution-body">
         <aside class="execution-attempts">
           <div class="execution-section-title"><strong>Push / Run</strong><span>{{ visibleAttempts.length }}</span></div>

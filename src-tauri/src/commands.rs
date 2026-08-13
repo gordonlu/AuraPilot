@@ -1,8 +1,11 @@
 use crate::providers::claude::ClaudeProcess;
-use crate::providers::codex::{CodexAppSession, CodexLiveHandle, StartedTurn};
+use crate::providers::codex::{
+    CodexAppSession, CodexApprovalDecision, CodexApprovalKind, CodexLiveHandle, StartedTurn,
+    parse_approval_request,
+};
 use crate::providers::opencode::{OpenCodeLiveHandle, OpenCodeServer};
 use crate::state::AppState;
-use crate::{EXECUTION_EVENT, PUSH_ATTEMPT_EVENT, platform};
+use crate::{APPROVAL_EVENT, EXECUTION_EVENT, PUSH_ATTEMPT_EVENT, platform};
 use aurapilot_core::agent_profile::{
     AgentLaunchProfile, LaunchMode, PromptTransport, is_builtin_profile,
 };
@@ -21,8 +24,9 @@ use aurapilot_core::project_scanner::{
 };
 use aurapilot_core::push_attempt::{PushAttempt, PushAttemptStatus, PushDelivery};
 use aurapilot_core::runtime_store::{
-    AgentProvider, ExecutionEvent, NewExecutionEvent, NewPush, NewSessionBinding,
-    PushDeliveryPolicy, PushMode, PushStatus, SessionBinding, SessionBindingSource,
+    AgentProvider, ApprovalDecision, ApprovalKind, ApprovalRecord, ApprovalStatus, ExecutionEvent,
+    NewApprovalRequest, NewExecutionEvent, NewPush, NewSessionBinding, PushDeliveryPolicy,
+    PushMode, PushStatus, RuntimeStoreError, SessionBinding, SessionBindingSource,
     SessionRuntimeState, SessionVerification,
 };
 use aurapilot_core::session_route::{PushRoute, SessionCapabilities, route_push};
@@ -125,7 +129,7 @@ fn codex_event_summary(event: &serde_json::Value) -> Option<(&'static str, &'sta
         return Some((
             "approval",
             "warning",
-            "Agent 请求交互审批；AuraPilot 当前无法代替用户响应，该请求会被拒绝。".into(),
+            "AuraPilot 暂不支持该类型的 Provider 请求，已明确拒绝，不会自动批准。".into(),
         ));
     }
     let item = event.pointer("/params/item");
@@ -193,6 +197,165 @@ fn provider_event_detail(event: &serde_json::Value) -> Option<String> {
     let mut detail = event.clone();
     redact(&mut detail);
     serde_json::to_string_pretty(&detail).ok()
+}
+
+type SharedRuntime = std::sync::Arc<std::sync::Mutex<aurapilot_core::runtime_store::RuntimeStore>>;
+
+/// Routes a Codex server request without leaking its full payload outside the
+/// adapter. Supported approvals are persisted before the provider is allowed
+/// to wait; malformed or mismatched requests are explicitly declined.
+fn handle_codex_server_request(
+    runtime: &SharedRuntime,
+    app: &AppHandle,
+    execution: Option<&ExecutionContext>,
+    session_id: Uuid,
+    current_turn_id: &str,
+    event: &serde_json::Value,
+    live_handle: &CodexLiveHandle,
+) {
+    let method = event
+        .get("method")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let Some(parsed) = parse_approval_request(event) else {
+        if let Some(context) = execution {
+            let (_, _, message) = codex_event_summary(event).unwrap_or((
+                "approval",
+                "warning",
+                format!("AuraPilot 暂不支持 Provider 请求 {method}，已明确拒绝。"),
+            ));
+            record_execution_event(
+                runtime,
+                app,
+                context,
+                ExecutionEventNote {
+                    kind: "approval",
+                    level: "warning",
+                    phase: method,
+                    message: &message,
+                    detail: None,
+                },
+            );
+        }
+        return;
+    };
+    let decline = |reason: &str| {
+        let request_id = event.get("id").cloned().unwrap_or(serde_json::Value::Null);
+        let detail = match live_handle.decline_unanswerable_request(&request_id) {
+            Ok(()) => reason.to_owned(),
+            Err(error) => format!("{reason}；拒绝响应发送失败：{error}"),
+        };
+        if let Some(context) = execution {
+            record_execution_event(
+                runtime,
+                app,
+                context,
+                ExecutionEventNote {
+                    kind: "approval",
+                    level: "error",
+                    phase: method,
+                    message: "审批请求无法交给用户处理，已明确拒绝",
+                    detail: Some(&detail),
+                },
+            );
+        }
+    };
+    let request = match parsed {
+        Ok(request) => request,
+        Err(error) => return decline(&format!("审批请求格式无法识别：{error}")),
+    };
+    let binding = runtime
+        .lock()
+        .ok()
+        .and_then(|store| store.session(session_id).ok().flatten());
+    let Some(binding) = binding else {
+        return decline("审批对应的 Session 绑定不存在");
+    };
+    if request.thread_id != binding.external_session_id {
+        return decline("审批请求属于另一个 Codex Thread，与当前 Session 不匹配");
+    }
+    if request.turn_id != current_turn_id {
+        return decline("审批请求来自已结束的 Turn，不是当前运行中的 Turn");
+    }
+    let provider_request_key = match serde_json::to_string(&request.request_id) {
+        Ok(key) => key,
+        Err(error) => return decline(&format!("审批请求标识无法保存：{error}")),
+    };
+    let (project_id, task_id, profile_id) = execution.map_or_else(
+        || (binding.project_id, None, binding.profile_id.clone()),
+        |context| {
+            (
+                context.project_id,
+                Some(context.task_id.clone()),
+                context.profile_id.clone(),
+            )
+        },
+    );
+    let kind = match request.kind {
+        CodexApprovalKind::CommandExecution => ApprovalKind::CommandExecution,
+        CodexApprovalKind::FileChange => ApprovalKind::FileChange,
+    };
+    let record = match runtime
+        .lock()
+        .map_err(|error| error.to_string())
+        .and_then(|mut store| {
+            store
+                .create_approval_request(NewApprovalRequest {
+                    project_id,
+                    task_id: task_id.as_deref(),
+                    profile_id: &profile_id,
+                    provider: AgentProvider::Codex,
+                    session_binding_id: session_id,
+                    attempt_id: execution.and_then(|context| context.attempt_id),
+                    turn_id: &request.turn_id,
+                    item_id: &request.item_id,
+                    provider_request_key: &provider_request_key,
+                    kind,
+                    command: request.command.as_deref(),
+                    cwd: request.cwd.as_deref(),
+                    reason: request.reason.as_deref(),
+                })
+                .map_err(|error| error.to_string())
+        }) {
+        Ok(record) => record,
+        Err(error) => return decline(&format!("审批记录写入本地数据库失败：{error}")),
+    };
+    emit_or_log(app, APPROVAL_EVENT, &record);
+    match runtime.lock() {
+        Ok(mut store) => {
+            if let Err(error) = store.update_session_runtime(
+                session_id,
+                SessionRuntimeState::WaitingApproval,
+                Some(&request.turn_id),
+            ) {
+                eprintln!("failed to persist Codex approval boundary: {error}");
+            }
+        }
+        Err(error) => eprintln!("runtime store lock poisoned after approval persisted: {error}"),
+    }
+    if let Some(context) = execution {
+        let message = match request.kind {
+            CodexApprovalKind::CommandExecution => format!(
+                "Codex 请求执行命令：{}；等待你在执行中心批准或拒绝",
+                request.command.as_deref().unwrap_or("未提供命令摘要")
+            ),
+            CodexApprovalKind::FileChange => {
+                "Codex 请求应用文件变更；等待你在执行中心批准或拒绝".to_owned()
+            }
+        };
+        record_execution_event(
+            runtime,
+            app,
+            context,
+            ExecutionEventNote {
+                kind: "approval",
+                level: "warning",
+                phase: method,
+                message: &message,
+                detail: None,
+            },
+        );
+    }
 }
 
 fn opencode_matching_message<'a>(
@@ -1113,6 +1276,150 @@ pub async fn list_execution_events(
             .map_err(|error| error.to_string())?
             .list_execution_events(project_id, task_id.as_deref(), limit.unwrap_or(300))
             .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn list_approval_requests(
+    project_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<ApprovalRecord>, String> {
+    let project_id = project_id
+        .map(|value| Uuid::parse_str(&value).map_err(|error| error.to_string()))
+        .transpose()?;
+    let runtime = state.runtime.clone();
+    let limit = state.config.approval_retention;
+    tauri::async_runtime::spawn_blocking(move || {
+        runtime
+            .lock()
+            .map_err(|error| error.to_string())?
+            .list_approval_requests(project_id, limit)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn respond_approval_request(
+    approval_id: String,
+    decision: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ApprovalRecord, String> {
+    let approval_id = Uuid::parse_str(&approval_id).map_err(|error| error.to_string())?;
+    let decision = match decision.as_str() {
+        "accept" => ApprovalDecision::Accept,
+        "decline" => ApprovalDecision::Decline,
+        other => {
+            return Err(format!(
+                "不支持的审批决定 {other}；AuraPilot 不会代替用户选择"
+            ));
+        }
+    };
+    let runtime = state.runtime.clone();
+    let codex_sessions = state.codex_sessions.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let claimed = {
+            let mut store = runtime.lock().map_err(|error| error.to_string())?;
+            store
+                .claim_approval_request(approval_id)
+                .map_err(|error| match error {
+                    RuntimeStoreError::ApprovalNotFound(id) => format!("审批记录不存在：{id}"),
+                    RuntimeStoreError::ApprovalStateConflict { actual, .. } => {
+                        format!("该审批已经处于 {actual} 状态，不能重复处理")
+                    }
+                    other => other.to_string(),
+                })?
+        };
+        emit_or_log(&app, APPROVAL_EVENT, &claimed);
+        let fail = |status: ApprovalStatus, message: String| -> String {
+            match runtime.lock() {
+                Ok(mut store) => match store.fail_approval_request(approval_id, status, &message) {
+                    Ok(record) => emit_or_log(&app, APPROVAL_EVENT, &record),
+                    Err(error) => eprintln!("failed to persist approval failure: {error}"),
+                },
+                Err(error) => {
+                    eprintln!("runtime store lock poisoned after approval failure: {error}")
+                }
+            }
+            message
+        };
+        let session = runtime
+            .lock()
+            .map_err(|error| error.to_string())?
+            .session(claimed.session_binding_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| {
+                fail(
+                    ApprovalStatus::Expired,
+                    "审批对应的 Session 已不存在".into(),
+                )
+            })?;
+        if session.provider != AgentProvider::Codex {
+            return Err(fail(
+                ApprovalStatus::Failed,
+                "该 Session 不是 Codex，未发送审批结果".into(),
+            ));
+        }
+        if session.active_turn_id.as_deref() != Some(claimed.turn_id.as_str()) {
+            return Err(fail(
+                ApprovalStatus::Expired,
+                "审批对应的 Codex Turn 已结束".into(),
+            ));
+        }
+        let live = codex_sessions
+            .lock()
+            .map_err(|error| error.to_string())?
+            .get(&session.id)
+            .cloned()
+            .ok_or_else(|| {
+                fail(
+                    ApprovalStatus::Expired,
+                    "Codex 连接已断开，审批结果无法送达".into(),
+                )
+            })?;
+        let request_id = serde_json::from_str(&claimed.provider_request_key)
+            .map_err(|_| fail(ApprovalStatus::Failed, "审批请求标识损坏，无法响应".into()))?;
+        let adapter_decision = match decision {
+            ApprovalDecision::Accept => CodexApprovalDecision::Accept,
+            ApprovalDecision::Decline => CodexApprovalDecision::Decline,
+        };
+        live.respond_approval(&request_id, adapter_decision)
+            .map_err(|error| fail(ApprovalStatus::Failed, format!("审批结果发送失败：{error}")))?;
+        let completed = {
+            let mut store = runtime.lock().map_err(|error| error.to_string())?;
+            let completed = match store.complete_approval_request(approval_id, decision) {
+                Ok(completed) => completed,
+                Err(error) => {
+                    drop(store);
+                    return Err(fail(
+                        ApprovalStatus::Failed,
+                        format!(
+                            "审批结果已送达 Codex，但本地状态更新失败：{error}；请以 Codex 实际行为为准"
+                        ),
+                    ));
+                }
+            };
+            if store
+                .pending_approvals_for_session(session.id)
+                .map_err(|error| error.to_string())?
+                == 0
+            {
+                store
+                    .update_session_runtime(
+                        session.id,
+                        SessionRuntimeState::Running,
+                        Some(&claimed.turn_id),
+                    )
+                    .map_err(|error| format!("审批已完成，但 Session 状态恢复失败：{error}"))?;
+            }
+            completed
+        };
+        emit_or_log(&app, APPROVAL_EVENT, &completed);
+        Ok(completed)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -4360,22 +4667,24 @@ fn monitor_codex_inbox(
             );
         }
         let completed = codex.wait_for_turn_observing(&turn.turn_id, |event| {
+            if event.get("id").is_some() && event.get("method").is_some() {
+                handle_codex_server_request(
+                    &runtime,
+                    &app,
+                    execution.as_ref(),
+                    session_id,
+                    &turn.turn_id,
+                    event,
+                    &live_handle,
+                );
+                return;
+            }
             let Some(context) = execution.as_ref() else {
                 return;
             };
             let Some((kind, level, message)) = codex_event_summary(event) else {
                 return;
             };
-            if kind == "approval"
-                && let Ok(mut store) = runtime.lock()
-                && let Err(error) = store.update_session_runtime(
-                    session_id,
-                    SessionRuntimeState::WaitingApproval,
-                    Some(&turn.turn_id),
-                )
-            {
-                eprintln!("failed to persist Codex approval boundary: {error}");
-            }
             let detail = provider_event_detail(event);
             let phase = event
                 .get("method")
@@ -4433,6 +4742,23 @@ fn monitor_codex_inbox(
             )
         {
             emit_or_log(&app, PUSH_ATTEMPT_EVENT, &exited);
+        }
+        match runtime
+            .lock()
+            .map_err(|error| error.to_string())
+            .and_then(|mut store| {
+                store
+                    .expire_session_approvals(
+                        session_id,
+                        Some(&turn.turn_id),
+                        "对应 Turn 已结束，Codex 不再接受该审批响应",
+                    )
+                    .map_err(|error| error.to_string())
+            }) {
+            Ok(expired) => expired
+                .iter()
+                .for_each(|record| emit_or_log(&app, APPROVAL_EVENT, record)),
+            Err(error) => eprintln!("failed to expire Codex approvals at turn end: {error}"),
         }
         if let Err(error) = completed {
             if let Ok(mut store) = runtime.lock()
@@ -4575,6 +4901,23 @@ fn monitor_codex_inbox(
         if is_current {
             sessions.remove(&session_id);
         }
+    }
+    match runtime
+        .lock()
+        .map_err(|error| error.to_string())
+        .and_then(|mut store| {
+            store
+                .expire_session_approvals(
+                    session_id,
+                    None,
+                    "Codex 监控连接已关闭，审批无法继续响应",
+                )
+                .map_err(|error| error.to_string())
+        }) {
+        Ok(expired) => expired
+            .iter()
+            .for_each(|record| emit_or_log(&app, APPROVAL_EVENT, record)),
+        Err(error) => eprintln!("failed to expire Codex approvals at monitor exit: {error}"),
     }
 }
 

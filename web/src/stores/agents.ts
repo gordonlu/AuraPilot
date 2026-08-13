@@ -4,6 +4,8 @@ import { defineStore } from 'pinia'
 import { invokeBackend } from '../backend'
 import type {
   AgentLaunchProfile,
+  ApprovalDecision,
+  ApprovalRequest,
   AgentProvider,
   AgentProfileEntry,
   AgentSessionBinding,
@@ -23,6 +25,7 @@ const demoProvider = (profileId: string): AgentProvider => {
 
 export const PUSH_ATTEMPT_EVENT = 'aurapilot://push-attempt'
 export const EXECUTION_EVENT = 'aurapilot://execution-event'
+export const APPROVAL_EVENT = 'aurapilot://approval-request'
 
 const builtin = (
   id: string,
@@ -69,10 +72,13 @@ export const useAgentsStore = defineStore('agents', {
     runtimeError: null as string | null,
     stopListening: null as UnlistenFn | null,
     stopExecutionListening: null as UnlistenFn | null,
+    stopApprovalListening: null as UnlistenFn | null,
     pushAttempts: [] as PushAttempt[],
     executionEvents: [] as ExecutionEvent[],
     executionLoading: false,
     executionError: null as string | null,
+    approvals: [] as ApprovalRequest[],
+    approvalError: null as string | null,
   }),
   actions: {
     async startWatchingAttempts() {
@@ -81,6 +87,9 @@ export const useAgentsStore = defineStore('agents', {
         this.pushAttempts = await invokeBackend<PushAttempt[]>('list_push_attempts')
         this.executionEvents = await invokeBackend<ExecutionEvent[]>('list_execution_events', {
           projectId: null, taskId: null, limit: 300,
+        })
+        this.approvals = await invokeBackend<ApprovalRequest[]>('list_approval_requests', {
+          projectId: null,
         })
       } catch (error) {
         this.executionError = `无法读取历史执行记录：${String(error)}`
@@ -100,15 +109,60 @@ export const useAgentsStore = defineStore('agents', {
           this.runtimeError = `${payload.task_id} · ${payload.profile_id}：${payload.message}${payload.detail ? `；${payload.detail}` : ''}`
         }
       })
+      this.stopApprovalListening = await listen<ApprovalRequest>(APPROVAL_EVENT, ({ payload }) => {
+        const index = this.approvals.findIndex((approval) => approval.id === payload.id)
+        if (index >= 0) this.approvals[index] = payload
+        else this.approvals.unshift(payload)
+      })
     },
     stopWatchingAttempts() {
       this.stopListening?.()
       this.stopExecutionListening?.()
+      this.stopApprovalListening?.()
       this.stopListening = null
       this.stopExecutionListening = null
+      this.stopApprovalListening = null
     },
     clearRuntimeError() {
       this.runtimeError = null
+    },
+    async loadApprovals(projectId?: string) {
+      if (!isTauri()) return this.approvals
+      this.approvalError = null
+      try {
+        this.approvals = await invokeBackend<ApprovalRequest[]>('list_approval_requests', {
+          projectId: projectId || null,
+        })
+        return this.approvals
+      } catch (error) {
+        this.approvalError = `无法读取审批请求：${String(error)}`
+        throw error
+      }
+    },
+    async respondApproval(approvalId: string, decision: ApprovalDecision) {
+      this.approvalError = null
+      const current = this.approvals.find((approval) => approval.id === approvalId)
+      if (current && current.status !== 'pending') throw new Error('该审批已经处理或失效')
+      try {
+        if (current) current.status = 'submitting'
+        const result = await invokeBackend<ApprovalRequest>('respond_approval_request', {
+          approvalId, decision,
+        })
+        const index = this.approvals.findIndex((approval) => approval.id === result.id)
+        if (index >= 0) this.approvals[index] = result
+        return result
+      } catch (error) {
+        const message = `审批处理失败：${String(error)}`
+        if (isTauri()) {
+          try {
+            await this.loadApprovals()
+          } catch {
+            // The response error below remains the primary user-visible cause.
+          }
+        } else if (current) current.status = 'pending'
+        this.approvalError = message
+        throw error
+      }
     },
     async loadExecutionEvents(projectId?: string, taskId?: string) {
       if (!isTauri()) return this.executionEvents

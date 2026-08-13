@@ -51,4 +51,33 @@ describe('Agent execution observability', () => {
     expect(wrapper.findAll('.execution-event')).toHaveLength(1)
     expect(wrapper.text()).toContain('请求交互审批')
   })
+
+  it('shows pending Codex approval as an explicit user decision', async () => {
+    const snapshots = demoSnapshots()
+    const project = snapshots[0]
+    const task = project.tasks[0].document.id!
+    const pinia = createPinia()
+    const agents = useAgentsStore(pinia)
+    vi.spyOn(agents, 'loadExecutionEvents').mockResolvedValue([])
+    vi.spyOn(agents, 'loadApprovals').mockResolvedValue([])
+    const respond = vi.spyOn(agents, 'respondApproval').mockResolvedValue({} as never)
+    agents.approvals = [{
+      id: 'approval-1', project_id: project.registration.id, task_id: task,
+      profile_id: 'codex', provider: 'codex', session_binding_id: 'session-1',
+      attempt_id: 'attempt-1', turn_id: 'turn-1', item_id: 'item-1',
+      provider_request_key: '51', kind: 'command_execution', command: 'pnpm test',
+      cwd: '/repo', reason: '运行测试', status: 'pending', decision: null, error: null,
+      created_at: '2026-08-10T10:00:00Z', updated_at: '2026-08-10T10:00:00Z', resolved_at: null,
+    }]
+
+    const wrapper = mount(ExecutionCenter, {
+      props: { snapshots, activeProject: project.registration.id },
+      global: { plugins: [pinia] },
+    })
+    expect(wrapper.text()).toContain('Codex 审批请求')
+    expect(wrapper.text()).toContain('pnpm test')
+    expect(wrapper.text()).toContain('等待处理')
+    await wrapper.find('.approval-actions .primary').trigger('click')
+    expect(respond).toHaveBeenCalledWith('approval-1', 'accept')
+  })
 })

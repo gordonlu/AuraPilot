@@ -1,1 +1,4 @@
-pub use aurapilot_codex::{CodexAppSession, CodexLiveHandle, StartedTurn};
+pub use aurapilot_codex::{
+    CodexAppSession, CodexApprovalDecision, CodexApprovalKind, CodexLiveHandle, StartedTurn,
+    parse_approval_request,
+};

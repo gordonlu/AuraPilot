@@ -46,6 +46,12 @@ impl AppState {
         if unloaded > 0 {
             eprintln!("marked {unloaded} previously loaded sessions as not_loaded");
         }
+        let expired_approvals = runtime.recover_pending_approvals()?;
+        if expired_approvals > 0 {
+            eprintln!(
+                "marked {expired_approvals} interrupted Codex approvals as expired; their live connections no longer exist"
+            );
+        }
         let mut watchers = ProjectWatchService::new(&config, on_change)?;
         for project in registry.projects() {
             if project.path.join(".aurapilot").is_dir()
