@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { nextTick, onMounted, reactive, ref } from 'vue'
 import { useProjectsStore } from '../stores/projects'
 import type { ProjectSnapshot, RepairPlan } from '../types/protocol'
 import UiIcon from './UiIcon.vue'
 
-defineProps<{ snapshots: ProjectSnapshot[] }>()
+const props = defineProps<{ snapshots: ProjectSnapshot[]; focusPath?: string | null }>()
 defineEmits<{ close: [] }>()
 
 const projects = useProjectsStore()
@@ -52,6 +52,14 @@ const apply = async (projectId: string, plan: RepairPlan) => {
     confirming.value = null
   }
 }
+onMounted(async () => {
+  if (!props.focusPath) return
+  const snapshot = props.snapshots.find((item) => item.diagnostics.some((diagnostic) => diagnostic.path === props.focusPath))
+  if (!snapshot) return
+  await preview(snapshot.registration.id)
+  await nextTick()
+  document.querySelector(`[data-repair-path="${CSS.escape(props.focusPath)}"]`)?.scrollIntoView({ block: 'center' })
+})
 </script>
 
 <template>
@@ -74,7 +82,7 @@ const apply = async (projectId: string, plan: RepairPlan) => {
           <p v-if="errors[snapshot.registration.id]" class="repair-notice error" role="alert">{{ errors[snapshot.registration.id] }}</p>
           <p v-if="notices[snapshot.registration.id]" class="repair-notice ok" role="status">{{ notices[snapshot.registration.id] }}</p>
           <p v-if="plans[snapshot.registration.id] && !plans[snapshot.registration.id].length" class="repair-empty">当前没有任务文件修复项。</p>
-          <article v-for="plan in plans[snapshot.registration.id]" :key="plan.id" :class="['repair-card', { manual: !fixable(plan) }]">
+          <article v-for="plan in plans[snapshot.registration.id]" :key="plan.id" :data-repair-path="plan.path" :class="['repair-card', { manual: !fixable(plan), focused: plan.path === focusPath }]">
             <header><strong>{{ planLabel(plan) }}</strong><b>{{ fixable(plan) ? '可确认修复' : '仅提示' }}</b></header>
             <h4>{{ plan.summary }}</h4>
             <code>{{ plan.path }}</code>

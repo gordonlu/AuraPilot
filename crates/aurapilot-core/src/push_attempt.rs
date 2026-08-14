@@ -138,19 +138,22 @@ impl PushAttemptStore {
         Ok(updated)
     }
 
-    pub fn recover_started_as_unknown(&mut self) -> Result<usize, PushAttemptError> {
+    pub fn recover_unfinished_as_unknown(&mut self) -> Result<usize, PushAttemptError> {
         let mut next = self.document.clone();
         let mut recovered = 0;
         for attempt in &mut next.attempts {
-            if attempt.status != PushAttemptStatus::Started {
-                continue;
-            }
+            let error = match attempt.status {
+                PushAttemptStatus::Started => {
+                    "AuraPilot 重启时该 Agent 仍在运行；进程已脱离监控，实际执行状态未知。请检查 Provider Session、任务文件和 Git 工作区后再决定是否重新发起"
+                }
+                PushAttemptStatus::Requested => {
+                    "AuraPilot 重启时该 Push 仍在等待投递；投递未开始或中断，实际执行状态未知。请确认后重新发起"
+                }
+                _ => continue,
+            };
             attempt.status = PushAttemptStatus::StatusUnknown;
             attempt.process_id = None;
-            attempt.error = Some(
-                "AuraPilot restarted while this Agent was running; inspect the Provider Session, task file, and Git workspace before retrying"
-                    .into(),
-            );
+            attempt.error = Some(error.into());
             recovered += 1;
         }
         if recovered > 0 {
@@ -255,10 +258,33 @@ mod tests {
             .unwrap();
 
         let mut reloaded = PushAttemptStore::load(&path, config).unwrap();
-        assert_eq!(reloaded.recover_started_as_unknown().unwrap(), 1);
+        assert_eq!(reloaded.recover_unfinished_as_unknown().unwrap(), 1);
         let recovered = &reloaded.attempts()[0];
         assert_eq!(recovered.status, PushAttemptStatus::StatusUnknown);
         assert_eq!(recovered.process_id, None);
-        assert!(recovered.error.as_deref().unwrap().contains("restarted"));
+        assert!(
+            recovered
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("实际执行状态未知")
+        );
+    }
+
+    #[test]
+    fn restart_marks_unfinished_requested_attempts_as_unknown() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("attempts.json");
+        let config = CoreConfig::default();
+        let mut store = PushAttemptStore::load(&path, config.clone()).unwrap();
+        store
+            .requested(Uuid::new_v4(), "TASK-002", "codex")
+            .unwrap();
+
+        let mut reloaded = PushAttemptStore::load(&path, config).unwrap();
+        assert_eq!(reloaded.recover_unfinished_as_unknown().unwrap(), 1);
+        let recovered = &reloaded.attempts()[0];
+        assert_eq!(recovered.status, PushAttemptStatus::StatusUnknown);
+        assert!(recovered.error.as_deref().unwrap().contains("等待投递"));
     }
 }

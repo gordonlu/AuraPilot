@@ -9,6 +9,7 @@ pub mod lock;
 pub mod model;
 pub mod parser;
 pub mod path_security;
+pub mod pending;
 pub mod pointer_prompt;
 pub mod profile_registry;
 pub mod project_registry;

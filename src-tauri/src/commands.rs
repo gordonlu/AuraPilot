@@ -990,6 +990,34 @@ pub async fn scan_projects(state: State<'_, AppState>) -> Result<Vec<ProjectSnap
 }
 
 #[tauri::command]
+pub async fn list_pending_items(
+    state: State<'_, AppState>,
+) -> Result<Vec<aurapilot_core::pending::PendingItem>, String> {
+    let config = state.config.clone();
+    let projects = state
+        .registry
+        .lock()
+        .map_err(|error| error.to_string())?
+        .projects()
+        .to_vec();
+    let runtime = state.runtime.clone();
+    let limit = config.approval_retention;
+    tauri::async_runtime::spawn_blocking(move || {
+        let snapshots = scan_all(&projects, &config, SeverityProfile::lenient());
+        let approvals = runtime
+            .lock()
+            .map_err(|error| error.to_string())?
+            .list_approval_requests(None, limit)
+            .map_err(|error| error.to_string())?;
+        Ok(aurapilot_core::pending::collect_pending_items(
+            &config, &approvals, &snapshots,
+        ))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 pub async fn scan_project(
     id: String,
     state: State<'_, AppState>,

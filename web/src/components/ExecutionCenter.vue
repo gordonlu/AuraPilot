@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useAgentsStore } from '../stores/agents'
 import type { ProjectSnapshot, PushAttempt } from '../types/protocol'
 import UiIcon from './UiIcon.vue'
 
-const props = defineProps<{ snapshots: ProjectSnapshot[]; activeProject: string }>()
+const props = defineProps<{ snapshots: ProjectSnapshot[]; activeProject: string; focusApprovalId?: string | null }>()
 const emit = defineEmits<{ close: []; openTask: [projectId: string, taskId: string] }>()
 const agents = useAgentsStore()
 const projectFilter = ref(props.activeProject === 'all' ? 'all' : props.activeProject)
@@ -66,7 +66,11 @@ const canOpenTask = (projectId: string, taskId: string) => props.snapshots
   .find((snapshot) => snapshot.registration.id === projectId)?.tasks
   .some((task) => task.document.id === taskId)
 
-onMounted(() => refresh().catch(() => undefined))
+onMounted(async () => {
+  await refresh().catch(() => undefined)
+  await nextTick()
+  if (props.focusApprovalId) document.querySelector(`[data-approval-id="${CSS.escape(props.focusApprovalId)}"]`)?.scrollIntoView({ block: 'center' })
+})
 </script>
 
 <template>
@@ -98,7 +102,7 @@ onMounted(() => refresh().catch(() => undefined))
         <div v-if="agents.approvalError" class="execution-error" role="alert"><UiIcon name="alert" :size="15"/><span>{{ agents.approvalError }}</span><button @click="refresh">刷新状态</button></div>
         <section v-if="visibleApprovals.length" class="approval-panel" aria-label="Codex 审批请求">
           <div class="execution-section-title"><strong>Codex 审批请求</strong><span>决定会发回原 Session 连接</span></div>
-          <article v-for="approval in visibleApprovals" :key="approval.id" :class="['approval-card', approval.status]">
+          <article v-for="approval in visibleApprovals" :key="approval.id" :data-approval-id="approval.id" :class="['approval-card', approval.status, { focused: approval.id === focusApprovalId }]">
             <header><strong>{{ approval.kind === 'command_execution' ? '命令执行' : '文件变更' }}</strong><b>{{ approval.status === 'pending' ? '等待处理' : approval.status === 'submitting' ? '正在提交' : approval.status === 'approved' ? '已批准' : approval.status === 'declined' ? '已拒绝' : approval.status === 'expired' ? '已失效' : '处理失败' }}</b></header>
             <p>{{ approval.command || 'Codex 请求应用文件变更' }}</p>
             <small>{{ projectName(approval.project_id) }} · {{ approval.task_id || '未关联任务' }} · {{ profileLabel(approval.profile_id) }}</small>

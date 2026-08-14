@@ -33,7 +33,7 @@ impl AppState {
         let registry = ProjectRegistry::load(registry_path()?, config.clone())?;
         let profiles = AgentProfileRegistry::load(profile_path()?, config.clone())?;
         let mut push_attempts = PushAttemptStore::load(push_attempt_path()?, config.clone())?;
-        let unknown_attempts = push_attempts.recover_started_as_unknown()?;
+        let unknown_attempts = push_attempts.recover_unfinished_as_unknown()?;
         if unknown_attempts > 0 {
             eprintln!("marked {unknown_attempts} unfinished Agent attempts as status_unknown");
         }
@@ -41,6 +41,10 @@ impl AppState {
         let recovered = runtime.recover_interrupted_deliveries()?;
         if recovered > 0 {
             eprintln!("recovered {recovered} interrupted push deliveries as delivery_unknown");
+        }
+        let orphaned = runtime.recover_unclaimed_new_session_pushes()?;
+        if orphaned > 0 {
+            eprintln!("failed {orphaned} unclaimed new-session pushes from before restart");
         }
         let unloaded = runtime.recover_loaded_sessions()?;
         if unloaded > 0 {

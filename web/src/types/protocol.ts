@@ -87,6 +87,27 @@ export interface RepairApplyReport {
   snapshot: ProjectSnapshot
 }
 
+export type PendingKind = 'approval' | 'repair'
+export interface PendingItem {
+  project_id: string
+  project_name: string
+  kind: PendingKind
+  task_id: string | null
+  title: string
+  detail: string | null
+  path: string | null
+  repair_kind: RepairKind | null
+  approval_id: string | null
+  created_at: string
+}
+
+export interface PendingTarget {
+  view: 'execution' | 'diagnostics'
+  project_id: string
+  approval_id: string | null
+  path: string | null
+}
+
 export type ProjectChangeKind =
   | 'created'
   | 'modified'

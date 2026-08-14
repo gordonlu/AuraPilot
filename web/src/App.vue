@@ -9,6 +9,7 @@ import BoardView from './components/BoardView.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import DiagnosticsPanel from './components/DiagnosticsPanel.vue'
 import ExecutionCenter from './components/ExecutionCenter.vue'
+import PendingMenu from './components/PendingMenu.vue'
 import EmptyState from './components/EmptyState.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
 import TaskFormModal from './components/TaskFormModal.vue'
@@ -19,6 +20,7 @@ import WorldSkinHost from './skins/WorldSkinHost.vue'
 import UiIcon from './components/UiIcon.vue'
 import { useProjectsStore } from './stores/projects'
 import { useAgentsStore } from './stores/agents'
+import { usePendingStore } from './stores/pending'
 import {
   resolveWorldSkin,
   WORLD_SKIN_STORAGE_KEY,
@@ -36,10 +38,11 @@ import {
   type BlockedTaskState,
 } from './skins/pets/signals'
 import { nextTheme, resolveTheme, type Theme } from './theme'
-import type { LocatedTask, TaskDraft, TaskTransition } from './types/protocol'
+import type { LocatedTask, PendingTarget, TaskDraft, TaskTransition } from './types/protocol'
 
 const projectsStore = useProjectsStore()
 const agentsStore = useAgentsStore()
+const pendingStore = usePendingStore()
 const activeProject = ref('all')
 const activeView = ref<'projects' | 'board' | 'blocked'>('projects')
 const search = ref('')
@@ -57,6 +60,8 @@ const modal = ref<'create' | 'edit' | 'add-project' | 'delete' | 'push' | 'profi
 const showDiagnostics = ref(false)
 const busy = ref(false)
 const actionError = ref<string | null>(null)
+const focusApprovalId = ref<string | null>(null)
+const focusDiagnosticPath = ref<string | null>(null)
 const lastRefresh = ref(new Date())
 const projectPath = ref('')
 const projectSelecting = ref(false)
@@ -103,6 +108,18 @@ const openTaskFromExecution = (projectId: string, taskId: string) => {
   activeProject.value = projectId
   activeView.value = 'board'
   selected.value = { projectId, taskId }
+}
+const openPendingTarget = (target: PendingTarget) => {
+  activeProject.value = target.project_id
+  if (target.view === 'execution') {
+    focusApprovalId.value = target.approval_id
+    modal.value = 'execution'
+    showDiagnostics.value = false
+  } else {
+    focusDiagnosticPath.value = target.path
+    showDiagnostics.value = true
+    modal.value = null
+  }
 }
 const closeOverlays = () => { modal.value = null; selected.value = null; showDiagnostics.value = false; actionError.value = null }
 const toggleTheme = () => {
@@ -235,6 +252,7 @@ onMounted(async () => {
   await agentsStore.startWatchingAttempts()
   await projectsStore.load()
   await projectsStore.startWatching()
+  await pendingStore.startWatching()
   if (import.meta.env.DEV) {
     const preview = new URLSearchParams(window.location.search)
     if (preview.get('view') === 'blocked') activeView.value = 'blocked'
@@ -260,6 +278,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   projectsStore.stopWatching()
   agentsStore.stopWatchingAttempts()
+  pendingStore.stopWatching()
   window.removeEventListener('keydown', onKeydown)
 })
 </script>
@@ -282,6 +301,7 @@ onBeforeUnmount(() => {
         <div class="current-project"><UiIcon name="folder"/><span>{{ activeView === 'projects' ? '项目一览' : activeProject === 'all' ? '所有项目' : visibleSnapshots[0]?.project?.name }}</span><b>{{ activeView === 'projects' ? allSnapshots.length : taskCount }}</b></div>
         <label class="search-box"><UiIcon name="search"/><input id="task-search" v-model="search" :placeholder="activeView === 'projects' ? '搜索项目名称或路径…' : '搜索任务或 ID…'"/><kbd>/</kbd></label>
         <div class="view-switch"><button :class="{ active: activeView === 'projects' }" @click="activeView = 'projects'"><UiIcon name="folder"/>项目</button><button :class="{ active: activeView === 'board' }" @click="activeView = 'board'"><UiIcon name="board"/>看板</button><button :class="{ active: activeView === 'blocked' }" @click="activeView = 'blocked'"><UiIcon name="alert"/>阻塞</button></div>
+        <PendingMenu @select="openPendingTarget"/>
         <button :class="['button', 'execution-button', { active: activeAgentRuns > 0 }]" @click="modal = 'execution'"><UiIcon name="terminal"/><span>执行</span><b>{{ activeAgentRuns }}</b></button>
         <button class="button primary" :disabled="!allSnapshots.length" @click="modal = 'create'"><UiIcon name="plus"/>新建任务</button>
       </header>
@@ -324,10 +344,10 @@ onBeforeUnmount(() => {
       :diagnostics="selectedDiagnostics" :busy="busy" :error="actionError"
       @close="selected = null" @edit="modal = 'edit'" @delete="modal = 'delete'" @push="modal = 'push'" @transition="transitionTask"
     />
-    <DiagnosticsPanel v-if="showDiagnostics" :snapshots="visibleSnapshots" @close="showDiagnostics = false" />
+    <DiagnosticsPanel v-if="showDiagnostics" :snapshots="visibleSnapshots" :focus-path="focusDiagnosticPath" @close="showDiagnostics = false; focusDiagnosticPath = null" />
     <ExecutionCenter
-      v-if="modal === 'execution'" :snapshots="allSnapshots" :active-project="activeProject"
-      @close="modal = null" @open-task="openTaskFromExecution"
+      v-if="modal === 'execution'" :snapshots="allSnapshots" :active-project="activeProject" :focus-approval-id="focusApprovalId"
+      @close="modal = null; focusApprovalId = null" @open-task="openTaskFromExecution"
     />
     <TaskFormModal
       v-if="modal === 'create' || (modal === 'edit' && selectedTask)" :mode="modal === 'edit' ? 'edit' : 'create'"

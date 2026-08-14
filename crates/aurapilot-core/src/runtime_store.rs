@@ -1072,6 +1072,18 @@ impl RuntimeStore {
         )?)
     }
 
+    /// New-session pushes are delivered by the command that enqueued them.
+    /// Unlike a session inbox, no recovery worker can claim one after restart.
+    pub fn recover_unclaimed_new_session_pushes(&mut self) -> Result<usize, RuntimeStoreError> {
+        Ok(self.connection.execute(
+            "UPDATE push_requests SET status = 'failed',
+                last_error = 'AuraPilot 在创建新 Session 前退出，投递未开始；可以安全地重新发起 Push',
+                updated_at = ?1
+             WHERE status = 'queued' AND mode = 'new_session'",
+            [now()],
+        )?)
+    }
+
     pub fn recover_loaded_sessions(&mut self) -> Result<usize, RuntimeStoreError> {
         Ok(self.connection.execute(
             "UPDATE session_bindings SET state = 'not_loaded', active_turn_id = NULL,
@@ -2038,6 +2050,60 @@ mod tests {
         assert_eq!(
             store.push(first.id).unwrap().unwrap().status,
             PushStatus::DeliveryUnknown
+        );
+    }
+
+    #[test]
+    fn restart_fails_unclaimed_new_session_pushes_but_keeps_session_inbox() {
+        let mut store = store();
+        let project = Uuid::new_v4();
+        let session = store
+            .register_session(NewSessionBinding {
+                project_id: project,
+                profile_id: "codex",
+                provider: AgentProvider::Codex,
+                external_session_id: "thr_inbox",
+                source: SessionBindingSource::Managed,
+                verification: SessionVerification::Verified,
+                display_name: None,
+                working_directory: Path::new("/repo"),
+                state: SessionRuntimeState::Running,
+            })
+            .unwrap();
+        let orphaned = store
+            .enqueue_push(NewPush {
+                project_id: project,
+                task_id: "TASK-001",
+                selected_profile_id: Some("codex"),
+                target_run_id: None,
+                target_session_id: None,
+                mode: PushMode::NewSession,
+                delivery: PushDeliveryPolicy::SafeBoundary,
+                content: "pointer",
+                idempotency_key: "orphan",
+            })
+            .unwrap();
+        let queued_for_session = store
+            .enqueue_push(NewPush {
+                project_id: project,
+                task_id: "TASK-002",
+                selected_profile_id: None,
+                target_run_id: None,
+                target_session_id: Some(session.id),
+                mode: PushMode::ExistingSession,
+                delivery: PushDeliveryPolicy::SafeBoundary,
+                content: "queued",
+                idempotency_key: "inbox",
+            })
+            .unwrap();
+
+        assert_eq!(store.recover_unclaimed_new_session_pushes().unwrap(), 1);
+        let orphaned = store.push(orphaned.id).unwrap().unwrap();
+        assert_eq!(orphaned.status, PushStatus::Failed);
+        assert!(orphaned.last_error.as_deref().unwrap().contains("重新发起"));
+        assert_eq!(
+            store.push(queued_for_session.id).unwrap().unwrap().status,
+            PushStatus::Queued
         );
     }
 
