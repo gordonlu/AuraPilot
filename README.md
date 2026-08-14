@@ -49,7 +49,7 @@ aurapilot codex status
 
 When the project has no recorded Codex Session, `codex open` creates and records one before opening the terminal UI. AuraPilot desktop and this CLI reuse the same local App Server, so a Push to that Session can appear in the attached terminal instead of an unrelated window.
 
-> **Beta:** managed startup currently supports Unix/Linux only and depends on Codex's evolving App Server and remote-resume interfaces. It may be unstable across Codex releases. Interactive approval requests are not yet handled by AuraPilot, so a task that needs approval can fail with an explicit error. Check the selected Session ID before Push and keep the copy-prompt fallback available.
+> **Beta:** managed startup currently supports Unix/Linux only and depends on Codex's evolving App Server and remote-resume interfaces. It may be unstable across Codex releases. Supported Codex command and file-change approvals appear in AuraPilot for an explicit approve or decline decision; unsupported or disconnected requests fail visibly instead of being accepted automatically. Check the selected Session ID before Push and keep the copy-prompt fallback available.
 
 ## Background Agent runs (Beta)
 
@@ -60,6 +60,8 @@ The desktop Push flow can also execute a task in a background Agent Session. Thi
 ### Execution center
 
 Open **执行** in the desktop toolbar to inspect persisted Push/Run status and Provider events across projects. Codex background runs expose Turn lifecycle, commands, file-change events, Agent messages, approval boundaries, completion, and failures. OpenCode currently exposes lifecycle and the final assistant response. External interactive terminals can only report process launch and exit because they do not provide AuraPilot with a structured event stream.
+
+The global **待处理** entry only collects items that currently need a user decision: pending Codex approvals and task-file repair plans. It reuses the original approval and diagnostic flows rather than creating another task system; resolved, expired, or repaired items disappear after refresh.
 
 Execution events are stored only in AuraPilot's local SQLite runtime database with bounded retention. Prompt/input fields are redacted from persisted raw Provider details. These events are operational evidence, not task state: `.aurapilot/tasks/` remains the source of truth, and users should still inspect task logs, Git changes, and verification output before accepting a result.
 
