@@ -30,6 +30,9 @@ use aurapilot_core::runtime_store::{
     SessionRuntimeState, SessionVerification,
 };
 use aurapilot_core::session_route::{PushRoute, SessionCapabilities, route_push};
+use aurapilot_core::task_repair::{
+    AppliedRepair, RepairPlan, apply_repair as apply_one_repair, plan_repairs,
+};
 use aurapilot_core::validation::SeverityProfile;
 use aurapilot_core::watcher::WatchError;
 use aurapilot_core::{
@@ -1006,6 +1009,42 @@ pub async fn scan_project(
         &state.config,
         SeverityProfile::lenient(),
     ))
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq)]
+pub struct RepairApplyReport {
+    pub applied: AppliedRepair,
+    pub snapshot: ProjectSnapshot,
+}
+
+#[tauri::command]
+pub async fn preview_task_repairs(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<RepairPlan>, String> {
+    let project = registered_project(&project_id, &state)?;
+    let config = state.config.clone();
+    tauri::async_runtime::spawn_blocking(move || plan_repairs(&project.path, &config))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn apply_task_repair(
+    project_id: String,
+    plan: RepairPlan,
+    state: State<'_, AppState>,
+) -> Result<RepairApplyReport, String> {
+    let project = registered_project(&project_id, &state)?;
+    let config = state.config.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let applied =
+            apply_one_repair(&project.path, &config, &plan).map_err(|error| error.to_string())?;
+        let snapshot = scan_one(&project, &config, SeverityProfile::lenient());
+        Ok(RepairApplyReport { applied, snapshot })
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -5172,7 +5211,8 @@ mod tests {
         let summary = codex_event_summary(&approval).unwrap();
         assert_eq!(summary.0, "approval");
         assert_eq!(summary.1, "warning");
-        assert!(summary.2.contains("无法代替用户响应"));
+        assert!(summary.2.contains("暂不支持"));
+        assert!(summary.2.contains("明确拒绝"));
         assert_eq!(
             codex_event_summary(&json!({ "method": "item/agentMessage/delta" })),
             None

@@ -3,6 +3,21 @@ use crate::model::{LocatedTask, ProjectDocument, TaskDocument, TaskState};
 use std::fs;
 use std::path::Path;
 
+pub const REQUIRED_TASK_COLLECTION_FIELDS: [&str; 3] = ["accept", "log", "blockers"];
+
+pub fn missing_task_collection_fields(
+    source: &str,
+) -> Result<Vec<&'static str>, serde_yaml::Error> {
+    let value = serde_yaml::from_str::<serde_yaml::Value>(source)?;
+    let Some(mapping) = value.as_mapping() else {
+        return Ok(REQUIRED_TASK_COLLECTION_FIELDS.to_vec());
+    };
+    Ok(REQUIRED_TASK_COLLECTION_FIELDS
+        .into_iter()
+        .filter(|field| !mapping.contains_key(serde_yaml::Value::String((*field).into())))
+        .collect())
+}
+
 pub fn parse_task_str(source: &str, path: &Path) -> Result<LocatedTask, Diagnostic> {
     let state = TaskState::from_task_path(path).ok_or_else(|| {
         Diagnostic::new(
@@ -84,5 +99,13 @@ mod tests {
         let error =
             parse_task_str("id: TASK-001\n", Path::new("other/backlog/TASK-001.yaml")).unwrap_err();
         assert_eq!(error.code, DiagnosticCode::InvalidLocation);
+    }
+
+    #[test]
+    fn reports_protocol_arrays_that_were_omitted_from_yaml() {
+        assert_eq!(
+            missing_task_collection_fields("id: TASK-001\naccept: []\n").unwrap(),
+            vec!["log", "blockers"]
+        );
     }
 }

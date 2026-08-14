@@ -17,6 +17,7 @@ pub mod push_attempt;
 pub mod runtime_store;
 pub mod session_route;
 pub mod task_id;
+pub mod task_repair;
 pub mod task_store;
 pub mod transaction;
 pub mod validation;

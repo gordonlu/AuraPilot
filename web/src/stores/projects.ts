@@ -11,6 +11,8 @@ import type {
   AuraImportReport,
   ProjectChange,
   ProjectSnapshot,
+  RepairApplyReport,
+  RepairPlan,
   RegisteredProject,
   TaskDraft,
   TaskTransition,
@@ -233,6 +235,18 @@ export const useProjectsStore = defineStore('projects', {
     async refresh(id: string) {
       const snapshot = await invokeBackend<ProjectSnapshot>('scan_project', { id })
       this.snapshots[id] = normalizeSnapshot(snapshot)
+    },
+    async previewRepairs(projectId: string): Promise<RepairPlan[]> {
+      if (!isTauri()) return []
+      return invokeLongBackend<RepairPlan[]>('preview_task_repairs', { projectId })
+    },
+    async applyRepair(projectId: string, plan: RepairPlan): Promise<RepairApplyReport> {
+      if (!isTauri()) throw new Error('演示模式不会修改任务文件')
+      const report = await invokeLongBackend<RepairApplyReport>('apply_task_repair', {
+        projectId, plan,
+      })
+      this.snapshots[projectId] = normalizeSnapshot(report.snapshot)
+      return report
     },
     refreshInBackground(id: string) {
       void this.refresh(id).catch((error) => {

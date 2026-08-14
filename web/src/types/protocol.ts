@@ -60,6 +60,33 @@ export interface ProjectSnapshot {
   diagnostics: Diagnostic[]
 }
 
+export type RepairKind = 'fill_protocol_fields' | 'rename_file' | 'manual'
+export type RepairAction =
+  | { type: 'rewrite'; new_content: string; changes: string[] }
+  | { type: 'rename_file'; target: string; new_content: string; changes: string[] }
+  | { type: 'manual'; reason: string; suggestion: string }
+
+export interface RepairPlan {
+  id: string
+  kind: RepairKind
+  path: string
+  summary: string
+  detail: string
+  action: RepairAction
+  source_sha256: string
+}
+
+export interface AppliedRepair {
+  kind: RepairKind
+  path: string
+  message: string
+}
+
+export interface RepairApplyReport {
+  applied: AppliedRepair
+  snapshot: ProjectSnapshot
+}
+
 export type ProjectChangeKind =
   | 'created'
   | 'modified'

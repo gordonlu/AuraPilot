@@ -1,7 +1,7 @@
 use crate::config::CoreConfig;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, Severity};
 use crate::model::{LocatedTask, ProjectDocument, TaskState};
-use crate::parser::{parse_project_str, parse_task_file};
+use crate::parser::{missing_task_collection_fields, parse_project_str, parse_task_file};
 use crate::project_registry::RegisteredProject;
 use crate::validation::{SchemaValidator, SeverityProfile, StatePolicyValidator};
 use serde::{Deserialize, Serialize};
@@ -150,6 +150,19 @@ fn scan_state_directory(
         }
         match parse_task_file(&path) {
             Ok(task) => {
+                if let Ok(source) = fs::read_to_string(&path)
+                    && let Ok(fields) = missing_task_collection_fields(&source)
+                {
+                    snapshot.diagnostics.extend(fields.into_iter().map(|field| {
+                        Diagnostic::new(
+                            profile.missing_required,
+                            DiagnosticCode::MissingRequired,
+                            format!("missing required field `{field}`"),
+                        )
+                        .field(field)
+                        .path(path.clone())
+                    }));
+                }
                 snapshot.diagnostics.extend(
                     schema
                         .validate_task(&task.document)
@@ -244,7 +257,7 @@ mod tests {
         protocol_repo(&repo);
         fs::write(
             repo.join(".aurapilot/tasks/backlog/TASK-001.yaml"),
-            "id: TASK-001\ntitle: Test\npriority: P1\ntype: test\ncreated: 2026-07-28\n",
+            "id: TASK-001\ntitle: Test\npriority: P1\ntype: test\ncreated: 2026-07-28\naccept: []\nlog: []\nblockers: []\n",
         )
         .unwrap();
         let snapshot = scan_project(
@@ -254,6 +267,29 @@ mod tests {
         );
         assert_eq!(snapshot.tasks.len(), 1);
         assert!(!snapshot.has_errors());
+        assert!(snapshot.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn distinguishes_an_omitted_protocol_array_from_an_empty_one() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        fs::create_dir(&repo).unwrap();
+        protocol_repo(&repo);
+        fs::write(
+            repo.join(".aurapilot/tasks/backlog/TASK-001.yaml"),
+            "id: TASK-001\ntitle: Test\npriority: P1\ntype: test\ncreated: 2026-07-28\naccept: []\nlog: []\n",
+        )
+        .unwrap();
+        let snapshot = scan_project(
+            &registration(&repo),
+            &CoreConfig::default(),
+            SeverityProfile::lenient(),
+        );
+        assert!(snapshot.diagnostics.iter().any(|item| {
+            item.code == DiagnosticCode::MissingRequired
+                && item.field.as_deref() == Some("blockers")
+        }));
     }
 
     #[test]

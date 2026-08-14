@@ -4,12 +4,12 @@ mod providers;
 mod state;
 
 use commands::{
-    add_project, bind_agent_session, create_task, delete_agent_profile, delete_task,
-    export_aura_tasks, fork_task_session, get_git_workspace_status, import_aura_tasks,
+    add_project, apply_task_repair, bind_agent_session, create_task, delete_agent_profile,
+    delete_task, export_aura_tasks, fork_task_session, get_git_workspace_status, import_aura_tasks,
     initialize_project, interrupt_task_session, list_agent_profiles, list_agent_sessions,
     list_approval_requests, list_execution_events, list_projects, list_push_attempts,
-    open_project_folder, preview_aura_import, preview_pointer_prompt, push_task,
-    push_task_to_session, remove_project, respond_approval_request, save_agent_profile,
+    open_project_folder, preview_aura_import, preview_pointer_prompt, preview_task_repairs,
+    push_task, push_task_to_session, remove_project, respond_approval_request, save_agent_profile,
     scan_project, scan_projects, steer_task_session, test_agent_profile, transition_task,
     update_agent_session, update_task,
 };
@@ -63,6 +63,8 @@ pub fn run() {
             open_project_folder,
             scan_projects,
             scan_project,
+            preview_task_repairs,
+            apply_task_repair,
             create_task,
             update_task,
             transition_task,
